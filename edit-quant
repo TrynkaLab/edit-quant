@@ -81,7 +81,7 @@ mkdir -p logs/${prefix}
 
 # Source your nextflow installation here (no-op off the farm, e.g. running
 # this locally for testing where `module` isn't available)
-command -v module >/dev/null 2>&1 && module load HGI/common/nextflow/26.04.6
+command -v module >/dev/null 2>&1 && module load HGI/common/nextflow/26.04
 
 # Needed for conda (bioconda/conda-forge) to reach the internet from the farm
 # when Nextflow auto-builds the environment.yml env
