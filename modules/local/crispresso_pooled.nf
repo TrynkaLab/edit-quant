@@ -9,12 +9,13 @@ process CRISPRESSO_POOLED {
     publishDir "${params.outdir}/crispresso", mode: 'copy'
 
     input:
-    tuple val(sample), path(fastq_1), path(fastq_2)
-    path amplicons_unique
-    val n_processes
+        tuple val(sample), path(fastq_1), path(fastq_2)
+        path amplicons_unique
+        val n_processes
 
     output:
-    path "CRISPRessoPooled_on_${sample}", emit: results
+        path "CRISPRessoPooled_on_${sample}", emit: results
+        path "*.html", emit: html_reports
 
     script:
     """
