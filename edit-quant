@@ -71,7 +71,7 @@ WORKDIR="../workdir"
 QUEUE="normal"
 RUNTIME_LIMIT="72"
 GROUP=""
-PROFILE="farm"
+PROFILE="lsf"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NF_FILE="${SCRIPT_DIR}/main.nf"
