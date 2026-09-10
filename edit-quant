@@ -68,9 +68,9 @@ WORKDIR="../workdir"
 
 # These control the parameters for the Nextflow driver job (not the
 # per-process resources -- those live in conf/base.config / conf/farm.config)
-QUEUE="normal"
-RUNTIME_LIMIT="72"
-GROUP=""
+QUEUE="oversubscribed"
+RUNTIME_LIMIT="120"
+GROUP="teamtrynka"
 PROFILE="lsf"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
