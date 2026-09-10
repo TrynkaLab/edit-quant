@@ -75,10 +75,11 @@ def sanitize(s):
 
 
 def sample_id(row):
-    return "%s_%s_%s" % (
-        sanitize(row["project_name"]),
-        sanitize(row["plate_name"]),
+    return "%s_%s_%s_%s" % (
+        sanitize(row["gene_name"]),
         sanitize(row["well_position"]),
+        sanitize(row["plate_name"]),
+        sanitize(row["project_name"]),
     )
 
 
