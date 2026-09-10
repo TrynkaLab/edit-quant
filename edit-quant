@@ -1,0 +1,216 @@
+#!/usr/bin/env bash
+# Runner for the edit_quant pipeline (amplicon mapping + CRISPRessoPooled).
+# Assumes this is being called from within this directory (main/); the
+# nextflow workdir defaults to one level up.
+
+set -e
+
+#-----------------------------------------------------------------------
+# Function definitions
+
+# Creates a string <date>_<hourminute>
+timestamp_folder_name() {
+  date '+%Y%m%d_%H%M'
+}
+
+# Checks if a path is writable
+check_writable_path() {
+    local path="$1"
+    # Check if path exists
+    if [ -e "$path" ]; then
+        # Path exists, check if writable
+        if [ -w "$path" ]; then
+            return 0
+        else
+            echo "❌ Error: Path '$path' exists but is not writable"
+            return 1
+        fi
+    else
+        # Path doesn't exist, check if parent directory is writable
+        local parent_dir=$(dirname "$path")
+        if [ -w "$parent_dir" ]; then
+            return 0
+        else
+            echo "❌ Error: Cannot create directory at '$path'. Parent directory not writable"
+            return 1
+        fi
+    fi
+}
+
+# Print usage
+usage() {
+    echo -e "Usage: $0 [-c <file.config>] [-p <profile>] [-l] [-w <workdir>] [-q <queue>] [-t <hours>] [-g <group>] -- [nextflow pipeline args]"
+    echo -e "-c\t\t\t\t<path/to/run.config> extra Nextflow config file for the run (e.g. sample-specific overrides)"
+    echo -e "-p\t\t\t\t<profile> Nextflow profile for the run [local|farm] (default: farm)"
+    echo -e "-l\t\t\t\tRun nextflow locally instead of submitting to LSF (shorthand for -p local)"
+    echo -e "-w\t\t\t\tSet the nextflow work directory (default: ../workdir)"
+    echo -e "-q\t\t\t\tSet the LSF queue for the nextflow driver job (default: normal)"
+    echo -e "-t\t\t\t\tSet the time limit for the nextflow driver job (hours) (default: 72)"
+    echo -e "-g\t\t\t\tSet the LSF group for the nextflow driver job (required unless -l)"
+    echo -e "-- The rest is passed straight through to nextflow -- this is how you set"
+    echo -e "   the pipeline's own params (--amplicon_manifest, --fastq_manifest,"
+    echo -e "   --ref_fasta, --gene_bed/--genes_gtf, ...), and it overrides anything in -c"
+    echo -e ""
+    echo -e "Examples:"
+    echo -e "  ./edit_quant -l -- --amplicon_manifest manifest.tsv --fastq_manifest fastq.tsv \\"
+    echo -e "      --ref_fasta genome.fa --genes_gtf genes.gtf.gz --outdir results"
+    echo -e "  ./edit_quant -p farm -g myteam -q normal -- --amplicon_manifest manifest.tsv \\"
+    echo -e "      --fastq_manifest fastq.tsv --ref_fasta genome.fa --gene_bed genome.genes.bed"
+    exit 1
+}
+
+#-----------------------------------------------------------------------
+#                 Update these for your installation
+#-----------------------------------------------------------------------
+# Set defaults
+SUBMIT=1
+WORKDIR="../workdir"
+
+# These control the parameters for the Nextflow driver job (not the
+# per-process resources -- those live in conf/base.config / conf/farm.config)
+QUEUE="normal"
+RUNTIME_LIMIT="72"
+GROUP=""
+PROFILE="farm"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+NF_FILE="${SCRIPT_DIR}/main.nf"
+
+prefix="$(timestamp_folder_name)"
+mkdir -p logs/${prefix}
+
+# Source your nextflow installation here (no-op off the farm, e.g. running
+# this locally for testing where `module` isn't available)
+command -v module >/dev/null 2>&1 && module load HGI/common/nextflow/26.04.6
+
+# Needed for conda (bioconda/conda-forge) to reach the internet from the farm
+# when Nextflow auto-builds the environment.yml env
+export HTTP_PROXY='http://wwwcache.sanger.ac.uk:3128'
+export HTTPS_PROXY='http://wwwcache.sanger.ac.uk:3128'
+export NXF_OPTS="-Xms4G -Xmx4G"
+
+# Set this to true to enable a more fancy logging.
+# This fancy logging is a bit funky and designed for interactive sessions!
+# Alternatively: tail -f <logfile>  or watch -n 1 tail -10 <logfile>
+# if not using an interactive session
+export NXF_ANSI_LOG=true
+
+# Nextflow version, change depending on installation you use
+export NXF_VER=26.04.6
+
+#-----------------------------------------------------------------
+while getopts ":c:p:hlw:q:t:g:" opt; do
+    case $opt in
+        c)
+            CONFIG_FILE="$OPTARG"
+            ;;
+        p)
+            PROFILE="$OPTARG"
+            ;;
+        l)
+            SUBMIT=0
+            PROFILE="local"
+            ;;
+        w)
+            WORKDIR="$OPTARG"
+            ;;
+        q)
+            QUEUE="$OPTARG"
+            ;;
+        t)
+            RUNTIME_LIMIT="$OPTARG"
+            ;;
+        g)
+            GROUP="$OPTARG"
+            ;;
+        h)
+            usage
+            ;;
+        \?)
+            echo "❌ ERROR: invalid option -$OPTARG"
+            usage
+            ;;
+        :)
+            echo "❌ ERROR: option -$OPTARG requires an argument"
+            usage
+            ;;
+    esac
+done
+
+# Drop all parsed options so "$@" is just the pass-through nextflow args
+shift $((OPTIND - 1))
+
+if [ "$SUBMIT" -eq 1 ] && [ -z "$GROUP" ]; then
+    echo "❌ ERROR: -g <LSF group> is required when submitting to LSF (pass -l to run locally instead)"
+    exit 1
+fi
+
+# Check .config extension
+if [ -n "$CONFIG_FILE" ] && [[ ! "$CONFIG_FILE" =~ \.config$ ]]; then
+    echo "❌ WARN: -c file '$CONFIG_FILE' does not have a .config extension"
+fi
+
+# Check if workdir is writable
+if ! check_writable_path "$WORKDIR"; then
+    exit 1
+fi
+
+# Just to make sure it gets logged correctly
+if [ "$SUBMIT" -eq 0 ]; then
+    QUEUE="Running locally"
+    RUNTIME_LIMIT="NA"
+fi
+
+echo "📄 Pipeline:       $NF_FILE"
+echo "📄 Config file:    ${CONFIG_FILE:-<none>}"
+echo "📒 Logs:           logs/${prefix}"
+echo "📂 Workdir:        $WORKDIR"
+echo "🔄 Profile/Queue:  $PROFILE / $QUEUE"
+echo "⏱️  Runtime limit:  $RUNTIME_LIMIT hours"
+echo "🟠 Arguments:      $@"
+
+# Build the nextflow command. Pipeline params (--amplicon_manifest etc) come
+# from whatever's left in "$@" after option parsing, and/or from -c's config
+# file -- CLI args here override the config file, same as any nextflow run.
+CMD="nextflow \
+-log logs/${prefix}/edit_quant.nextflow.log \
+run ${NF_FILE} \
+-profile ${PROFILE} \
+-w ${WORKDIR} \
+-resume \
+-with-report logs/${prefix}/edit_quant.nextflow.html \
+-with-trace logs/${prefix}/edit_quant.nextflow.trace"
+
+# Add the config if given
+if [ -n "$CONFIG_FILE" ]; then
+    CMD="$CMD -c ${CONFIG_FILE}"
+fi
+
+# Add the remaining arguments
+CMD="$CMD $@"
+
+echo "--------------------------------------------------------------------"
+echo $CMD
+echo "--------------------------------------------------------------------"
+if [ "$SUBMIT" -eq 0 ]; then
+    # This runs the nextflow job locally
+    eval $CMD
+else
+    #-----------------------------------------------------------------------
+    #                 Update this for your installation
+    #-----------------------------------------------------------------------
+    # This submits the nextflow runner (the driver, not the individual
+    # pipeline processes -- those go through conf/farm.config's LSF executor)
+    # to the cluster. Memory/queue here are for the lightweight driver only.
+    CMD="bsub -n 1 \
+    -G ${GROUP} \
+    -M 4000 \
+    -q ${QUEUE} \
+    -W ${RUNTIME_LIMIT}:00 \
+    -R 'span[hosts=1] select[mem>4000] rusage[mem=4000]' \
+    -o logs/${prefix}/edit_quant-%J.out \
+    -e logs/${prefix}/edit_quant-%J.err \
+    $CMD"
+
+    eval $CMD
+fi

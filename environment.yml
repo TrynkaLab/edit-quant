@@ -1,0 +1,9 @@
+name: amplicon_pipeline
+channels:
+  - bioconda
+  - conda-forge
+dependencies:
+  - python>=3.8
+  - bwa>=0.7.17
+  - samtools>=1.15
+  - crispresso2

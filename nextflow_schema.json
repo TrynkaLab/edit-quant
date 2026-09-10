@@ -1,0 +1,188 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "edit-quant pipeline parameters",
+    "description": "Amplicon mapping (BWA) + CRISPRessoPooled editing-efficiency pipeline",
+    "type": "object",
+    "$defs": {
+        "input_output_options": {
+            "title": "Input/output options",
+            "type": "object",
+            "fa_icon": "fas fa-terminal",
+            "description": "Define where the pipeline should find input data and save output data.",
+            "properties": {
+                "amplicon_manifest": {
+                    "type": "string",
+                    "format": "file-path",
+                    "exists": true,
+                    "description": "Tab-separated amplicon design manifest (gene/guide/primer columns).",
+                    "help_text": "Header row required. Column names are matched after stripping punctuation/case (guide_.1/guide_1/Guide1 all work): project_name, plate_name, well_position, gene_name, gene_id, species, guide1, guide2, guide3, amplicon_size, fwd_primer, rev_primer. Guides are given as RNA (U) and converted to DNA; primers are the plain fwd_primer/rev_primer columns (not adaptor-tagged final_* columns).",
+                    "fa_icon": "fas fa-file-csv"
+                },
+                "fastq_manifest": {
+                    "type": "string",
+                    "format": "file-path",
+                    "exists": true,
+                    "description": "Tab-separated fastq manifest (sample, fastq_1, fastq_2).",
+                    "help_text": "Header row required, 3 columns: sample, fastq_1, fastq_2. Every sample is screened with CRISPRessoPooled against the same shared, deduplicated amplicons panel.",
+                    "fa_icon": "fas fa-file-csv"
+                },
+                "outdir": {
+                    "type": "string",
+                    "format": "directory-path",
+                    "default": "./results",
+                    "description": "The output directory where the results will be saved.",
+                    "fa_icon": "fas fa-folder-open"
+                }
+            },
+            "required": [
+                "amplicon_manifest",
+                "fastq_manifest"
+            ]
+        },
+        "reference_genome_options": {
+            "title": "Reference genome options",
+            "type": "object",
+            "fa_icon": "fas fa-dna",
+            "description": "Reference genome, gene annotation and prebuilt index options.",
+            "properties": {
+                "ref_fasta": {
+                    "type": "string",
+                    "format": "file-path",
+                    "exists": true,
+                    "description": "Reference genome FASTA.",
+                    "fa_icon": "fas fa-dna"
+                },
+                "ref_fai": {
+                    "type": "string",
+                    "format": "file-path",
+                    "exists": true,
+                    "description": "FASTA index (.fai).",
+                    "help_text": "Defaults to `${ref_fasta}.fai`; built with `samtools faidx` if missing.",
+                    "fa_icon": "fas fa-file"
+                },
+                "bwa_index_prefix": {
+                    "type": "string",
+                    "description": "Prefix of a prebuilt BWA index (amb/ann/bwt/pac/sa).",
+                    "help_text": "Defaults to `ref_fasta`; built with `bwa index` if missing.",
+                    "fa_icon": "fas fa-file"
+                },
+                "gene_bed": {
+                    "type": "string",
+                    "format": "file-path",
+                    "exists": true,
+                    "description": "Gene BED file (chrom, start0, end, gene_id, gene_name, strand).",
+                    "help_text": "One of `gene_bed`/`genes_gtf` is required. If not supplied, it is built from `genes_gtf`.",
+                    "fa_icon": "fas fa-file"
+                },
+                "exon_bed": {
+                    "type": "string",
+                    "format": "file-path",
+                    "exists": true,
+                    "description": "Exon BED file; adds an `overlapping_exons` column to `validation_report.tsv`.",
+                    "fa_icon": "fas fa-file"
+                },
+                "genes_gtf": {
+                    "type": "string",
+                    "format": "file-path",
+                    "exists": true,
+                    "description": "Ensembl GTF used to build `gene_bed`/`exon_bed` if `gene_bed` isn't supplied.",
+                    "help_text": "One of `gene_bed`/`genes_gtf` is required.",
+                    "fa_icon": "fas fa-file"
+                }
+            },
+            "required": [
+                "ref_fasta"
+            ]
+        },
+        "amplicon_mapping_options": {
+            "title": "Amplicon mapping options",
+            "type": "object",
+            "fa_icon": "fas fa-sliders-h",
+            "description": "Tuning for the two-BWA-pass amplicon mapping. See mapping_amplicons/README.md for full rationale.",
+            "properties": {
+                "bwa_n": {
+                    "type": "integer",
+                    "default": 2,
+                    "minimum": 0,
+                    "description": "Max edit distance for the off-target (mismatch-tolerant) BWA pass.",
+                    "fa_icon": "fas fa-sliders-h"
+                },
+                "max_xa": {
+                    "type": "integer",
+                    "default": 1000,
+                    "minimum": 1,
+                    "description": "Max alternative hits BWA reports per query in the mismatch-tolerant pass.",
+                    "fa_icon": "fas fa-sliders-h"
+                },
+                "max_mismatch": {
+                    "type": "integer",
+                    "default": 2,
+                    "minimum": 0,
+                    "description": "Edit-distance threshold for a hit to count as a high-quality off-target.",
+                    "fa_icon": "fas fa-sliders-h"
+                },
+                "gene_window": {
+                    "type": "integer",
+                    "default": 500,
+                    "minimum": 0,
+                    "description": "bp padding around each gene when checking guide/primer overlap.",
+                    "fa_icon": "fas fa-sliders-h"
+                },
+                "high_copy_threshold": {
+                    "type": "integer",
+                    "default": 50,
+                    "minimum": 1,
+                    "description": "Flag guide/primer as HIGH_COPY_NUMBER above this many tied-best hits.",
+                    "fa_icon": "fas fa-sliders-h"
+                },
+                "reassign_primary": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Promote gene-matching tied alternates to primary; log + write corrected BAM.",
+                    "fa_icon": "fas fa-sliders-h"
+                }
+            }
+        },
+        "crispresso_options": {
+            "title": "CRISPRessoPooled options",
+            "type": "object",
+            "fa_icon": "fas fa-microscope",
+            "description": "Options passed through to CRISPRessoPooled.",
+            "properties": {
+                "crispresso_n_processes": {
+                    "type": "integer",
+                    "default": 1,
+                    "minimum": 1,
+                    "description": "Number of CRISPRessoPooled processes to run in parallel (n_processes).",
+                    "fa_icon": "fas fa-microchip"
+                }
+            }
+        }
+    },
+    "allOf": [
+        {
+            "$ref": "#/$defs/input_output_options"
+        },
+        {
+            "$ref": "#/$defs/reference_genome_options"
+        },
+        {
+            "$ref": "#/$defs/amplicon_mapping_options"
+        },
+        {
+            "$ref": "#/$defs/crispresso_options"
+        }
+    ],
+    "anyOf": [
+        {
+            "required": [
+                "gene_bed"
+            ]
+        },
+        {
+            "required": [
+                "genes_gtf"
+            ]
+        }
+    ]
+}
