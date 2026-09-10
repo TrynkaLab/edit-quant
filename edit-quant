@@ -109,7 +109,6 @@ while getopts ":c:p:hlw:q:t:g:" opt; do
             ;;
         l)
             SUBMIT=0
-            PROFILE="local"
             ;;
         w)
             WORKDIR="$OPTARG"
