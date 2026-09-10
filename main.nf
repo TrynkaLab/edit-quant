@@ -97,9 +97,16 @@ workflow {
     ch_amplicons_unique = DEDUP_AMPLICONS.out.amplicons_unique.first()
 
     // --- CRISPRessoPooled per fastq sample, against the shared amplicons panel ---
+    // CRISPResso slugifies --name internally (collapses runs of '_' etc. down to a
+    // single '_'), so a sample name containing e.g. a double underscore would make
+    // it write "CRISPRessoPooled_on_<slugified>" while Nextflow still expects the
+    // raw "CRISPRessoPooled_on_<sample>" -- pre-slugify here so both sides agree.
     ch_fastq = channel.fromPath(params.fastq_manifest, checkIfExists: true)
         .splitCsv(header: true, sep: '\t')
-        .map { row -> tuple(row.sample, file(row.fastq_1, checkIfExists: true), file(row.fastq_2, checkIfExists: true)) }
+        .map { row ->
+            def sample = row.sample.replaceAll(/[\s'*"\/\\\[\]:;|,<>?]/, '_').replaceAll(/_{2,}/, '_')
+            tuple(sample, file(row.fastq_1, checkIfExists: true), file(row.fastq_2, checkIfExists: true))
+        }
 
     CRISPRESSO_POOLED(ch_fastq, ch_amplicons_unique, params.crispresso_n_processes)
 }
