@@ -22,10 +22,8 @@ process BWA_ALN {
 
     script:
     """
-    bwa aln -t ${task.cpus} -n ${n_mismatches} -N ${index_prefix_name} ${fasta} \\
-        > ${prefix}.sai 2> bwa_aln.${prefix}.log
-    bwa samse -n ${max_xa} ${index_prefix_name} ${prefix}.sai ${fasta} \\
-        > ${prefix}.sam 2> bwa_samse.${prefix}.log
+    bwa aln -t ${task.cpus} -n ${n_mismatches} -N ${index_prefix_name} ${fasta} > ${prefix}.sai
+    bwa samse -n ${max_xa} ${index_prefix_name} ${prefix}.sai ${fasta} > ${prefix}.sam 
     samtools sort -@ ${task.cpus} -o ${prefix}.sorted.bam ${prefix}.sam
     samtools index ${prefix}.sorted.bam
     """
