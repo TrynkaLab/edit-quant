@@ -4,7 +4,7 @@ Nextflow (DSL2) pipeline: aligns a designed amplicon panel's guides + primers
 to a reference genome with BWA, extracts each amplicon's reference sequence,
 QC's primer orientation/gene overlap, then runs
 [CRISPRessoPooled](https://github.com/pinellolab/CRISPResso2) on each FASTQ
-sample against the resulting (deduplicated) amplicons panel.
+sample against the (deduplicated) amplicons of that sample's project.
 
 Translated from the bash/Python pipeline in
 `OTAR3086/analysis/mapping_amplicons/scripts` — see that directory's
@@ -26,16 +26,29 @@ given as RNA (`U`) and converted to DNA; primers are the plain
 
 ### `--fastq_manifest` (required)
 
-Tab-separated, header row required, 3 columns:
+Tab-separated, header row required. Columns `sample`, `project_name`,
+`fastq_1`, `fastq_2` are required; `donor` is optional (use `none` where
+not applicable). Column names must match exactly.
 
 ```
-sample	fastq_1	fastq_2
-sample_a	/path/to/sample_a_R1.fastq.gz	/path/to/sample_a_R2.fastq.gz
+sample	project_name	donor	fastq_1	fastq_2
+sample_a	proj-1	A	/path/to/sample_a_R1.fastq.gz	/path/to/sample_a_R2.fastq.gz
 ```
 
-Every sample is screened with CRISPRessoPooled against the *same* shared,
-deduplicated amplicons panel — there's no per-sample link to a specific
-`amplicon_manifest` row required or used.
+`project_name` links each sample to the `amplicon_manifest` rows with the
+same `project_name`: each sample is screened with CRISPRessoPooled against
+only its own project's amplicons. Samples whose project has no amplicons
+(not in the amplicon manifest, or none could be extracted) are reported
+with a warning and skipped; see `reports/sample_check.tsv`.
+
+### Input checks
+
+Both manifests are checked before anything runs (`lib/checks.nf`,
+`lib/validateInputs.nf`): headers, required values, that fastq files exist,
+and that sample names are unique (also after CRISPResso's own renaming).
+All problems in a file are reported together. Blank-like values (`NA`,
+`null`, empty, ...) are rejected; use `none` for an optional value that
+doesn't apply. `--skip_checks` turns these checks off.
 
 ### Reference / config params
 
@@ -54,6 +67,13 @@ deduplicated amplicons panel — there's no per-sample link to a specific
 | `high_copy_threshold` | no | default `50` — flags `HIGH_COPY_NUMBER` above this many tied-best hits |
 | `reassign_primary` | no | default `true` — promote gene-matching tied alternates to primary |
 | `crispresso_n_processes` | no | default `1` |
+| `crispresso_min_reads_to_use_region` | no | default `100` — CRISPRessoPooled skips amplicons with fewer assigned reads (CRISPResso's own default, 1000, left ~1/3 of amplicons unanalysed); keep in line with `report_min_reads` |
+| `report_edit_threshold` | no | default `50` — edit % at or above which a tested pair is a successful edit |
+| `report_wt_max_edit` | no | default `10` — edit % at or below which a tested WT pair is `success_wt` (no editing); above it the pair fails |
+| `report_min_reads` | no | default `100` — min aligned reads for a pair to count as tested |
+| `report_wt_pattern` | no | default `(^\|_)WT$` — regex on `donor` (or `sample` if donor is `none`); matching samples are reported separately |
+| `report_plate_format` | no | default `auto` — plate heatmap layout (`auto`, `24`, `96`, `384`, `1536`) |
+| `skip_checks` | no | default `false` — skip the input checks above |
 | `outdir` | no | default `./results` |
 
 If `ref_fai`/BWA index/`gene_bed`+`exon_bed` already exist on disk, the
@@ -125,13 +145,44 @@ the script are Sanger-farm-specific — adjust for your own installation.
 - `reports/validation_report.tsv` — per guide/primer: position, gene/exon
   overlap, status
 - `reports/amplicon_report.tsv` — per sample: amplicon coordinates, length,
-  orientation QC
+  orientation QC. When a primer has several equally-good hits that all pass
+  the gene/orientation checks (e.g. it sits in a tandem repeat), the hit
+  giving the length closest to `amplicon_size` is used; any remaining
+  mismatch with `amplicon_size` is flagged `LENGTH_MISMATCH` instead of `OK`
 - `reports/off_targets.tsv` — additional low-edit-distance hits
 - `reports/reassigned_primaries.tsv` — log of every tie-break correction
 - `reports/crispresso_amplicons.txt` — CRISPRessoPooled amplicons file (one
   row per sample whose amplicon was extracted)
 - `amplicons/<sample_id>.fa`, `amplicons/all_amplicons.fasta` — extracted
   reference amplicon sequences
-- `crispresso/amplicons_unique.txt` — the above, deduplicated by
-  `amplicon_seq` (CRISPRessoPooled requires unique sequences)
-- `crispresso/CRISPRessoPooled_on_<sample>/` — one per fastq-manifest sample
+- `reports/sample_check.tsv` — per fastq-manifest sample: project, donor,
+  number of amplicons and status (`OK`, `NO_PROJECT_IN_AMPLICON_MANIFEST`,
+  `NO_AMPLICONS_EXTRACTED`); only `OK` samples are run
+- `crispresso/amplicons_by_project/<project_name>.amplicons.txt` — the
+  above split by `project_name`. CRISPRessoPooled requires unique sequences,
+  and technical replicates (wells in a project sharing an amplicon) can't be
+  separated in a sample's pooled reads, so each group is merged into one
+  amplicon named after all its wells (e.g. `IL2RA_G4-D8-B9_<plate>_<project>`)
+  with the union of their guides
+- `reports/amplicon_replicates.tsv` — maps every well's amplicon name to the
+  merged CRISPResso amplicon name, with the number of replicates and whether
+  their guides differed
+- `crispresso/CRISPRessoPooled_on_<sample>/` — one per `OK` sample in
+  `sample_check.tsv`
+- `report/edit_quant_report.html` — self-contained summary report over all
+  samples, laid out like the tglow-pipeline QC report:
+  - *Summary*: sample/amplicon/pair counts, successful edits and mean
+    edit %, with WT samples (`report_wt_pattern`) in their own column so they
+    don't contribute; histogram of aligned reads per pair
+  - *QC*: success/success_wt/fail/not-tested pairs per sample, and a filterable table
+    of every pair
+  - *Plates*: edit % heatmap per design plate and sample
+  - *Amplicon x donor*: edit % heatmap per project
+- `report/pair_summary.tsv` — the report's pair table: one row per sample x
+  amplicon with reads, edit % and status. For edited samples, `success`/`fail`
+  are tested pairs (&ge; `report_min_reads` aligned reads) above/below
+  `report_edit_threshold`. WT samples are expected to be unedited, so their
+  tested pairs are `success_wt` at or below `report_wt_max_edit` and `fail`
+  above it;
+  `not_tested` pairs give a reason (`no_reads`, `not_aligned`, `low_depth`,
+  `crispresso_failed`)

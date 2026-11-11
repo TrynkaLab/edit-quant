@@ -366,6 +366,42 @@ def find_tied_alternate(current_hit, candidates, matches):
     return next((h for h in tied if matches(h)), None)
 
 
+def pair_span(hit_a, hit_b):
+    """Length of the amplicon spanned by two primer hits (outermost coordinates)."""
+    return max(hit_a.end, hit_b.end) - min(hit_a.start, hit_b.start) + 1
+
+
+def find_size_matching_alternate(fwd_result, rev_result, declared_size, gene_ok):
+    """When a primer has several equally-good hits that all pass the gene and
+    orientation checks -- e.g. a primer inside a tandem repeat, occurring more
+    than once a few hundred bp apart -- BWA's pick among them is arbitrary and
+    can give an amplicon far longer/shorter than designed. Search each primer's
+    tied alternates (holding the other primer fixed) for the one that brings
+    the pair closest to the declared amplicon size, keeping orientation and
+    gene overlap OK. Returns (seq_type, result, hit) only if that strictly
+    improves on the current pair, else None."""
+    fwd_p, rev_p = fwd_result["p"], rev_result["p"]
+    if fwd_p.chrom == rev_p.chrom and primer_orientation_ok(fwd_p, rev_p):
+        current_diff = abs(pair_span(fwd_p, rev_p) - declared_size)
+    else:
+        current_diff = float("inf")
+    if current_diff == 0:
+        return None
+
+    best = None  # (diff, seq_type, result, hit)
+    for seq_type, result, other in (("fwd_primer", fwd_result, rev_p), ("rev_primer", rev_result, fwd_p)):
+        cur = result["p"]
+        tied = sorted((h for h in result["candidates"] if h.nm == cur.nm), key=lambda h: (h.chrom, h.start))
+        for h in tied:
+            pair = (h, other) if seq_type == "fwd_primer" else (other, h)
+            if not primer_orientation_ok(*pair) or not gene_ok(h):
+                continue
+            diff = abs(pair_span(*pair) - declared_size)
+            if diff < current_diff and (best is None or diff < best[0]):
+                best = (diff, seq_type, result, h)
+    return best[1:] if best else None
+
+
 def compute_status_bits(gene_match, overlaps, n_alt, n_best_hits, high_copy_threshold, reassigned_from):
     status_bits = []
     if gene_match:
@@ -567,6 +603,43 @@ def main():
             "strand", "edit_distance", "source", "overlapping_genes",
         ]) + "\n")
 
+        def swap_primer(sample_id, seq_type, result, new_hit, declared_gene_id, declared_gene_name):
+            """Promote a tied alternate to seq_type's position after the per-read
+            gene-match pass: updates `result` in place (position, overlaps, status),
+            the OK/flagged/reassigned counters and the corrected-SAM log. Returns
+            the new primary Hit (the caller updates per_type_position)."""
+            nonlocal n_ok, n_flagged, n_reassigned
+            new_p, new_candidates, reassigned_from = apply_reassignment(
+                sample_id, seq_type, result["position_source"],
+                result["p"], new_hit, result["candidates"], rout,
+            )
+            overlaps = gene_index.overlapping(new_p.chrom, new_p.start, new_p.end)
+            exon_overlaps = exon_index.overlapping(new_p.chrom, new_p.start, new_p.end) if exon_index else []
+            gene_match = declared_gene_in_overlaps(overlaps, declared_gene_id, declared_gene_name)
+            n_alt = len(new_candidates)
+
+            old_category = result["status_bits"][0]
+            status_bits = compute_status_bits(
+                gene_match, overlaps, n_alt, result["qr"].n_best_hits,
+                args.high_copy_threshold, reassigned_from,
+            )
+            if old_category != status_bits[0]:
+                n_ok += 1 if status_bits[0] == "OK" else -1
+                n_flagged += 1 if status_bits[0] != "OK" else -1
+
+            result.update({
+                "p": new_p, "candidates": new_candidates, "overlaps": overlaps,
+                "gene_match": gene_match, "exon_overlaps": exon_overlaps, "n_alt": n_alt,
+                "status_bits": status_bits, "reassigned_from": reassigned_from,
+            })
+            n_reassigned += 1
+            if result["position_source"] == "exact":
+                reassignments[(sample_id, seq_type)] = {
+                    "chrom": new_p.chrom, "pos": new_p.start, "strand": new_p.strand,
+                    "cigar": new_p.cigar, "nm": new_p.nm, "xa": format_xa(new_candidates),
+                }
+            return new_p
+
         for sample_id, row in rows.items():
             declared_gene_name = row["gene_name"]
             declared_gene_id = row["gene_id"]
@@ -659,37 +732,32 @@ def main():
                         )
                         fixed_result, fixed_seq_type = rev_result, "rev_primer"
                     if fix is not None:
-                        old_p = fixed_result["p"]
-                        new_p, new_candidates, reassigned_from = apply_reassignment(
-                            sample_id, fixed_seq_type, fixed_result["position_source"],
-                            old_p, fix, fixed_result["candidates"], rout,
+                        per_type_position[fixed_seq_type] = swap_primer(
+                            sample_id, fixed_seq_type, fixed_result, fix, declared_gene_id, declared_gene_name,
                         )
-                        overlaps = gene_index.overlapping(new_p.chrom, new_p.start, new_p.end)
-                        exon_overlaps = exon_index.overlapping(new_p.chrom, new_p.start, new_p.end) if exon_index else []
-                        gene_match = declared_gene_in_overlaps(overlaps, declared_gene_id, declared_gene_name)
-                        n_alt = len(new_candidates)
 
-                        old_category = fixed_result["status_bits"][0]
-                        status_bits = compute_status_bits(
-                            gene_match, overlaps, n_alt, fixed_result["qr"].n_best_hits,
-                            args.high_copy_threshold, reassigned_from,
-                        )
-                        if old_category != status_bits[0]:
-                            n_ok += 1 if status_bits[0] == "OK" else -1
-                            n_flagged += 1 if status_bits[0] != "OK" else -1
-
-                        fixed_result.update({
-                            "p": new_p, "candidates": new_candidates, "overlaps": overlaps,
-                            "gene_match": gene_match, "exon_overlaps": exon_overlaps, "n_alt": n_alt,
-                            "status_bits": status_bits, "reassigned_from": reassigned_from,
-                        })
-                        per_type_position[fixed_seq_type] = new_p
-                        n_reassigned += 1
-                        if fixed_result["position_source"] == "exact":
-                            reassignments[(sample_id, fixed_seq_type)] = {
-                                "chrom": new_p.chrom, "pos": new_p.start, "strand": new_p.strand,
-                                "cigar": new_p.cigar, "nm": new_p.nm, "xa": format_xa(new_candidates),
-                            }
+            # --- declared-size fix: the gene and orientation checks above can't tell
+            # apart two tied hits that both pass them (e.g. a primer occurring twice
+            # within a repeat inside the gene), so BWA's arbitrary pick can give an
+            # amplicon far off the designed size. Use amplicon_size to choose.
+            declared_size_int = None
+            try:
+                declared_size_int = int(row.get("amplicon_size", ""))
+            except ValueError:
+                pass
+            fwd_result, rev_result = per_type_result.get("fwd_primer"), per_type_result.get("rev_primer")
+            if declared_size_int and fwd_result is not None and rev_result is not None:
+                size_fix = find_size_matching_alternate(
+                    fwd_result, rev_result, declared_size_int,
+                    lambda h: declared_gene_in_overlaps(
+                        gene_index.overlapping(h.chrom, h.start, h.end), declared_gene_id, declared_gene_name
+                    ),
+                )
+                if size_fix is not None:
+                    fixed_seq_type, fixed_result, fix = size_fix
+                    per_type_position[fixed_seq_type] = swap_primer(
+                        sample_id, fixed_seq_type, fixed_result, fix, declared_gene_id, declared_gene_name,
+                    )
 
             # amplicon bounds, needed for distance_from_amplicon_start below. Ignores
             # strand/direction entirely -- just the leftmost (5') reference coordinate.
@@ -855,6 +923,12 @@ def main():
                 n_flagged += 1
             else:
                 status = "OK" if orientation_ok else "UNEXPECTED_ORIENTATION"
+                if status == "OK" and length_diff not in ("", "0"):
+                    # primers placed in a sane orientation, but not at the designed
+                    # distance apart -- most likely a wrong pick among repeat copies
+                    # that the declared-size fix couldn't resolve. Still written to the
+                    # CRISPResso amplicons file, but flagged rather than reported OK.
+                    status = "LENGTH_MISMATCH"
                 if status == "OK":
                     n_amplicons_ok += 1
                 else:

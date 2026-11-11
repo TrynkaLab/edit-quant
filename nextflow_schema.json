@@ -22,8 +22,8 @@
                     "type": "string",
                     "format": "file-path",
                     "exists": true,
-                    "description": "Tab-separated fastq manifest (sample, fastq_1, fastq_2).",
-                    "help_text": "Header row required, 3 columns: sample, fastq_1, fastq_2. Every sample is screened with CRISPRessoPooled against the same shared, deduplicated amplicons panel.",
+                    "description": "Tab-separated fastq manifest (sample, project_name, fastq_1, fastq_2, optional donor).",
+                    "help_text": "Header row required with columns sample, project_name, fastq_1, fastq_2 and an optional donor column ('none' if not applicable). Each sample is screened with CRISPRessoPooled against only the amplicons whose amplicon-manifest project_name matches; samples whose project has no amplicons are skipped with a warning.",
                     "fa_icon": "fas fa-file-csv"
                 },
                 "outdir": {
@@ -155,6 +155,71 @@
                     "minimum": 1,
                     "description": "Number of CRISPRessoPooled processes to run in parallel (n_processes).",
                     "fa_icon": "fas fa-microchip"
+                },
+                "crispresso_min_reads_to_use_region": {
+                    "type": "integer",
+                    "default": 100,
+                    "minimum": 1,
+                    "description": "Minimum reads assigned to an amplicon for CRISPRessoPooled to analyse it (min_reads_to_use_region; CRISPResso's own default is 1000). Amplicons below this appear as not_aligned in the report.",
+                    "fa_icon": "fas fa-sliders-h"
+                }
+            }
+        },
+        "report_options": {
+            "title": "Summary report options",
+            "type": "object",
+            "fa_icon": "fas fa-chart-bar",
+            "description": "Options for the summary report (report/edit_quant_report.html).",
+            "properties": {
+                "report_edit_threshold": {
+                    "type": "number",
+                    "default": 50,
+                    "minimum": 0,
+                    "maximum": 100,
+                    "description": "Edit % at or above which a tested sample x amplicon pair counts as a successful edit.",
+                    "fa_icon": "fas fa-percent"
+                },
+                "report_wt_max_edit": {
+                    "type": "number",
+                    "default": 10,
+                    "minimum": 0,
+                    "maximum": 100,
+                    "description": "Edit % at or below which a tested WT sample x amplicon pair counts as success_wt (no editing); above it the pair fails.",
+                    "fa_icon": "fas fa-percent"
+                },
+                "report_min_reads": {
+                    "type": "integer",
+                    "default": 100,
+                    "minimum": 0,
+                    "description": "Minimum aligned reads for a sample x amplicon pair to count as tested.",
+                    "fa_icon": "fas fa-sliders-h"
+                },
+                "report_wt_pattern": {
+                    "type": "string",
+                    "default": "(^|_)WT$",
+                    "description": "Regex matched against donor (or sample name if donor is 'none'); matching samples are reported separately as WT.",
+                    "fa_icon": "fas fa-filter"
+                },
+                "report_plate_format": {
+                    "type": "string",
+                    "default": "auto",
+                    "enum": ["auto", "24", "96", "384", "1536"],
+                    "description": "Plate layout for the plate heatmaps; 'auto' picks the smallest standard plate that fits.",
+                    "fa_icon": "fas fa-th"
+                }
+            }
+        },
+        "generic_options": {
+            "title": "Generic options",
+            "type": "object",
+            "fa_icon": "fas fa-file-import",
+            "description": "Less common options for the pipeline.",
+            "properties": {
+                "skip_checks": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Skip the nf-schema and custom manifest checks.",
+                    "fa_icon": "fas fa-forward"
                 }
             }
         }
@@ -171,6 +236,12 @@
         },
         {
             "$ref": "#/$defs/crispresso_options"
+        },
+        {
+            "$ref": "#/$defs/report_options"
+        },
+        {
+            "$ref": "#/$defs/generic_options"
         }
     ],
     "anyOf": [

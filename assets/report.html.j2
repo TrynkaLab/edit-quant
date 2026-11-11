@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>edit-quant report</title>
+<script>{{ plotlyjs }}</script>
+<style>
+  /* Styling follows the tglow-core QC report (tglow/qc/templates/qc_report.html.j2) */
+  :root { color-scheme: light dark; --tglow-accent: #0e9e86; }
+  body { font-family: -apple-system, Segoe UI, Helvetica, Arial, sans-serif; margin: 0; padding: 0; }
+  .page-head { position: sticky; top: 0; z-index: 100; }
+  header { background: var(--tglow-accent); color: #fff; }
+  header .inner { max-width: 1400px; margin: 0 auto; padding: 1rem 2rem; display: flex; align-items: baseline; gap: 0.75rem; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 1.3rem; }
+  header .run-date { margin: 0; font-size: 0.85rem; opacity: 0.85; }
+  nav { border-bottom: 1px solid #8884; background: Canvas; }
+  nav .inner { max-width: 1400px; margin: 0 auto; padding: 0.5rem 2rem; display: flex; flex-wrap: wrap; gap: 0.25rem; }
+  nav button { padding: 0.5rem 1rem; border: 1px solid #8884; border-radius: 6px; background: transparent; cursor: pointer; font-size: 0.95rem; }
+  nav button.active { background: color-mix(in srgb, var(--tglow-accent) 25%, transparent); border-color: var(--tglow-accent); }
+  main { max-width: 1400px; margin: 0 auto; padding: 1.5rem 2rem 3rem; box-sizing: border-box; }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+  .metrics { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1.5rem; }
+  .metric { background: #8881; border-radius: 8px; padding: 0.6rem 1rem; min-width: 110px; }
+  .metric .value { font-size: 1.15rem; font-weight: 600; }
+  .metric .label { font-size: 0.72rem; opacity: 0.7; margin-top: 0.15rem; }
+  .metric.hero { background: color-mix(in srgb, var(--tglow-accent) 14%, transparent); border: 1px solid color-mix(in srgb, var(--tglow-accent) 45%, transparent); }
+  .metric.hero .value { font-size: 2.1rem; font-weight: 700; color: var(--tglow-accent); }
+  .metric.hero .label { font-size: 0.85rem; opacity: 0.85; }
+  .stats-box { background: rgba(136, 136, 136, 0.07); border: 1px solid rgba(136, 136, 136, 0.18); border-radius: 12px; padding: 1.1rem 1.25rem; margin-bottom: 1.5rem; }
+  .stats-box .metrics { margin-bottom: 0.75rem; }
+  .stats-box .metrics:last-child { margin-bottom: 0; }
+  table.stats { border-collapse: collapse; width: 100%; }
+  table.stats th { padding: 0.3rem 0.4rem; font-size: 0.8rem; text-align: right; opacity: 0.7; font-weight: 600; border-bottom: 1px solid rgba(136, 136, 136, 0.35); }
+  table.stats th:first-child { text-align: left; }
+  table.stats td { padding: 0.3rem 0.4rem; font-size: 0.85rem; border-bottom: 1px solid rgba(136, 136, 136, 0.18); }
+  table.stats td.label { opacity: 0.7; }
+  table.stats td:last-child { text-align: right; font-weight: 500; }
+  table.stats td.num { text-align: right; font-weight: 500; }
+  table.stats tr:last-child td { border-bottom: none; }
+  table.stats tr.section td { opacity: 1; font-weight: 600; padding-top: 0.8rem; }
+  table.data { border-collapse: collapse; width: 100%; font-size: 0.8rem; }
+  table.data th { position: sticky; top: 0; background: Canvas; text-align: left; padding: 0.35rem 0.4rem; border-bottom: 1px solid rgba(136, 136, 136, 0.45); }
+  table.data td { padding: 0.25rem 0.4rem; border-bottom: 1px solid rgba(136, 136, 136, 0.15); }
+  table.data td.num { text-align: right; }
+  table.sortable th { cursor: pointer; user-select: none; white-space: nowrap; }
+  table.sortable th::after { content: " \2195"; opacity: 0.35; }
+  table.sortable th.asc::after { content: " \2191"; opacity: 1; }
+  table.sortable th.desc::after { content: " \2193"; opacity: 1; }
+  .table-scroll { max-height: 600px; overflow: auto; border: 1px solid rgba(136, 136, 136, 0.18); border-radius: 8px; }
+  .status { display: inline-block; padding: 0 0.45rem; border-radius: 4px; font-size: 0.75rem; color: #fff; }
+  .status.success { background: #0e9e86; }
+  .status.success_wt { background: #3d85c6; }
+  .status.fail { background: #e07a5f; }
+  .status.not_tested { background: #9e9e9e; }
+  .two-col { display: flex; gap: 1.5rem; align-items: flex-start; flex-wrap: wrap; }
+  .two-col > div { flex: 1; min-width: 280px; }
+  .two-col > .col-fixed { flex: 0 0 260px; }
+  .grid { display: flex; flex-wrap: wrap; gap: 1rem; }
+  .grid-item { min-width: 320px; }
+  select { padding: 0.3rem 0.6rem; font-size: 0.95rem; margin: 0 0.5rem 1rem 0; }
+  .project-block { display: none; }
+  .project-block.active { display: block; }
+  .missing { opacity: 0.6; font-style: italic; padding: 1rem; border: 1px dashed #8886; border-radius: 6px; display: inline-block; }
+  .note { opacity: 0.7; font-size: 0.85rem; }
+  h2 { margin-top: 0; }
+  h3 { margin-top: 1.5rem; }
+</style>
+</head>
+<body>
+
+<div class="page-head">
+  <header><div class="inner"><h1>edit-quant report</h1><p class="run-date">Generated {{ generated_at }} · edit-quant {{ pipeline_version }}</p></div></header>
+
+  <nav><div class="inner">
+    <button class="tab-btn active" data-tab="summary">Summary</button>
+    <button class="tab-btn" data-tab="qc">QC</button>
+  {% if plates.available %}
+    <button class="tab-btn" data-tab="plates">Plates</button>
+  {% endif %}
+  {% if donors.available %}
+    <button class="tab-btn" data-tab="donors">Amplicon x donor</button>
+  {% endif %}
+  </div></nav>
+</div>
+
+<main>
+
+<!-- ==================== Tab 1: Summary ==================== -->
+<section id="tab-summary" class="tab-content active">
+  <h2>Summary</h2>
+  {% set e = summary.edited %}
+  {% set w = summary.wt %}
+  {% set a = summary.amplicons %}
+  <div class="two-col">
+    <div>
+      <div class="stats-box">
+        <div class="metrics">
+          <div class="metric hero"><div class="value">{{ e.n_success }}</div><div class="label">Successful edits ({{ e.pct_success }} of tested pairs)</div></div>
+          <div class="metric hero"><div class="value">{{ e.mean_edit }}</div><div class="label">Mean edit % (tested pairs)</div></div>
+        </div>
+        <p class="note">Headline numbers are edited samples only; WT samples have their own column below. A successful edit is a tested pair with edit % &ge; {{ params.edit_threshold }}; a WT pair is success_wt if its edit % is &le; {{ params.wt_max_edit }} (no editing), and fail above that.</p>
+        <table class="stats">
+          <tr><th></th><th>Edited</th><th>WT</th></tr>
+          <tr class="section"><td colspan="3">Samples ({{ summary.n_input_samples }} input)</td></tr>
+          <tr><td class="label">Input samples</td><td class="num">{{ e.n_samples }}</td><td>{{ w.n_samples }}</td></tr>
+          <tr><td class="label">Samples run</td><td class="num">{{ e.n_run }}</td><td>{{ w.n_run }}</td></tr>
+          <tr><td class="label">Samples skipped (no amplicons for project)</td><td class="num">{{ e.n_skipped }}</td><td>{{ w.n_skipped }}</td></tr>
+          <tr><td class="label">Samples failed (no CRISPResso output)</td><td class="num">{{ e.n_failed }}</td><td>{{ w.n_failed }}</td></tr>
+          <tr class="section"><td colspan="3">Pairs (sample x amplicon)</td></tr>
+          <tr><td class="label">Total pairs</td><td class="num">{{ e.n_pairs }}</td><td>{{ w.n_pairs }}</td></tr>
+          <tr><td class="label">Tested pairs (&ge; {{ params.min_reads }} aligned reads)</td><td class="num">{{ e.n_tested }}</td><td>{{ w.n_tested }}</td></tr>
+          <tr><td class="label">Not tested pairs</td><td class="num">{{ e.n_not_tested }}</td><td>{{ w.n_not_tested }}</td></tr>
+          <tr><td class="label">Success (edited: edit % &ge; {{ params.edit_threshold }})</td><td class="num">{{ e.n_success }} ({{ e.pct_success }})</td><td>&ndash;</td></tr>
+          <tr><td class="label">Success WT (WT: edit % &le; {{ params.wt_max_edit }})</td><td class="num">&ndash;</td><td>{{ w.n_success_wt }} ({{ w.pct_success_wt }})</td></tr>
+          <tr><td class="label">Fail</td><td class="num">{{ e.n_fail }} ({{ e.pct_fail }})</td><td>{{ w.n_fail }} ({{ w.pct_fail }})</td></tr>
+          <tr><td class="label">Mean edit %</td><td class="num">{{ e.mean_edit }}</td><td>{{ w.mean_edit }}</td></tr>
+          <tr><td class="label">Median edit %</td><td class="num">{{ e.median_edit }}</td><td>{{ w.median_edit }}</td></tr>
+        </table>
+      </div>
+    </div>
+    <div class="col-fixed">
+      <div class="stats-box">
+        <table class="stats">
+          <tr class="section"><td colspan="2">Amplicons (projects run)</td></tr>
+          <tr><td class="label">Designed wells</td><td>{{ a.n_designed }}</td></tr>
+          <tr><td class="label">Unique amplicons (replicates merged)</td><td>{{ a.n_unique }}</td></tr>
+          <tr><td class="label">Not extracted from reference</td><td>{{ a.n_not_extracted }}</td></tr>
+          <tr><td class="label">Failed to amplify (not tested in any edited sample with output)</td><td>{{ a.n_not_amplified }}</td></tr>
+          <tr class="section"><td colspan="2">Settings</td></tr>
+          <tr><td class="label">Edit threshold</td><td>{{ params.edit_threshold }}%</td></tr>
+          <tr><td class="label">WT max edit</td><td>{{ params.wt_max_edit }}%</td></tr>
+          <tr><td class="label">Min aligned reads</td><td>{{ params.min_reads }}</td></tr>
+          <tr><td class="label">WT pattern</td><td><code>{{ params.wt_pattern }}</code></td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <h3>Read depth</h3>
+  {{ summary.read_depth_html | safe }}
+</section>
+
+<!-- ==================== Tab 2: QC ==================== -->
+<section id="tab-qc" class="tab-content">
+  <h2>QC</h2>
+  {{ qc.status_barplot_html | safe }}
+
+  <h3>Per sample</h3>
+  <select id="sample-state-select" onchange="filterSamples()">
+    <option value="all">All states</option>
+  {% for state in qc.per_sample | map(attribute='state') | unique | sort %}
+    <option value="{{ state }}">{{ state }}</option>
+  {% endfor %}
+  </select>
+  <span class="note" id="sample-count"></span>
+  <div class="table-scroll">
+  <table class="data sortable" id="sample-table">
+    <tr><th>Sample</th><th>Project</th><th>Donor</th><th>WT</th><th>State</th><th>Success</th><th>Success WT</th><th>Fail</th><th>Not tested</th><th>Mean edit %</th></tr>
+  {% for s in qc.per_sample %}
+    <tr data-state="{{ s.state }}"><td>{{ s.sample }}</td><td>{{ s.project_name }}</td><td>{{ s.donor }}</td><td>{{ "yes" if s.is_wt else "" }}</td><td>{{ s.state }}</td>
+      <td class="num">{{ s.success }}</td><td class="num">{{ s.success_wt }}</td><td class="num">{{ s.fail }}</td><td class="num">{{ s.not_tested }}</td><td class="num">{{ s.mean_edit }}</td></tr>
+  {% endfor %}
+  </table>
+  </div>
+
+  <h3>Pairs</h3>
+  <select id="pair-status-select" onchange="filterPairs()">
+    <option value="all">All statuses</option>
+  {% for status in qc.statuses %}
+    <option value="{{ status }}">{{ status }}</option>
+  {% endfor %}
+  </select>
+  <select id="pair-reason-select" onchange="filterPairs()">
+    <option value="all">All reasons</option>
+  {% for reason in qc.pairs | map(attribute='reason') | unique | sort %}
+    <option value="{{ reason }}">{{ reason if reason else "(none - tested)" }}</option>
+  {% endfor %}
+  </select>
+  <select id="pair-sample-select" onchange="filterPairs()">
+    <option value="all">All samples</option>
+  {% for s in qc.per_sample if s.state == "OK" or s.state == "CRISPRESSO_FAILED" %}
+    <option value="{{ s.sample }}">{{ s.sample }}</option>
+  {% endfor %}
+  </select>
+  <span class="note" id="pair-count"></span>
+  <div class="table-scroll">
+  <table class="data sortable" id="pair-table">
+    <tr><th>Sample</th><th>Donor</th><th>Amplicon</th><th>Gene</th><th>Wells</th><th>Aligned reads</th><th>Edit %</th><th>Status</th><th>Reason</th></tr>
+  {% for p in qc.pairs %}
+    <tr data-status="{{ p.status }}" data-reason="{{ p.reason }}" data-sample="{{ p.sample }}"><td>{{ p.sample }}</td><td>{{ p.donor }}</td><td>{{ p.amplicon }}</td><td>{{ p.gene_name }}</td><td>{{ p.wells }}</td>
+      <td class="num">{{ p.reads_aligned }}</td><td class="num">{{ p.modified_pct }}</td><td><span class="status {{ p.status }}">{{ p.status }}</span></td><td>{{ p.reason }}</td></tr>
+  {% endfor %}
+  </table>
+  </div>
+</section>
+
+<!-- ==================== Tab 3: Plates ==================== -->
+{% if plates.available %}
+<section id="tab-plates" class="tab-content">
+  <h2>Plates</h2>
+  <p class="note">Edit % per design well, one heatmap per sample. Grey wells were designed but not tested; replicate wells show the shared (merged) amplicon's value.</p>
+  <select id="plate-project-select" onchange="showBlock('plate', this.value)">
+  {% for project in plates.by_project.keys() %}
+    <option value="{{ project }}">{{ project }}</option>
+  {% endfor %}
+  </select>
+
+  {% for project, project_plates in plates.by_project.items() %}
+  <div class="project-block{{ ' active' if loop.first else '' }}" data-group="plate" data-block="{{ project }}">
+    {% for plate in project_plates %}
+    <h3>Plate {{ plate.plate }}</h3>
+    <div class="grid">
+    {% for html in plate.figures %}
+      <div class="grid-item">{{ html | safe }}</div>
+    {% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
+<!-- ==================== Tab 4: Amplicon x donor ==================== -->
+{% if donors.available %}
+<section id="tab-donors" class="tab-content">
+  <h2>Amplicon x donor</h2>
+  <p class="note">Edit % per amplicon (rows) and donor (columns), WT last. Grey cells were not tested.</p>
+  <select id="donor-project-select" onchange="showBlock('donor', this.value)">
+  {% for project in donors.by_project.keys() %}
+    <option value="{{ project }}">{{ project }}</option>
+  {% endfor %}
+  </select>
+
+  {% for project, html in donors.by_project.items() %}
+  <div class="project-block{{ ' active' if loop.first else '' }}" data-group="donor" data-block="{{ project }}">
+    {{ html | safe }}
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
+</main>
+
+<script>
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+      window.dispatchEvent(new Event('resize'));
+    });
+  });
+
+  function showBlock(group, block) {
+    document.querySelectorAll('[data-group="' + group + '"]').forEach(el => {
+      el.classList.toggle('active', el.dataset.block === block);
+    });
+    window.dispatchEvent(new Event('resize'));
+  }
+
+  function filterPairs() {
+    const status = document.getElementById('pair-status-select').value;
+    const reason = document.getElementById('pair-reason-select').value;
+    const sample = document.getElementById('pair-sample-select').value;
+    let shown = 0;
+    document.querySelectorAll('#pair-table tr[data-status]').forEach(row => {
+      const visible = (status === 'all' || row.dataset.status === status)
+        && (reason === 'all' || row.dataset.reason === reason)
+        && (sample === 'all' || row.dataset.sample === sample);
+      row.style.display = visible ? '' : 'none';
+      if (visible) shown++;
+    });
+    document.getElementById('pair-count').textContent = shown + ' pairs';
+  }
+  filterPairs();
+
+  function filterSamples() {
+    const state = document.getElementById('sample-state-select').value;
+    let shown = 0;
+    document.querySelectorAll('#sample-table tr[data-state]').forEach(row => {
+      const visible = state === 'all' || row.dataset.state === state;
+      row.style.display = visible ? '' : 'none';
+      if (visible) shown++;
+    });
+    document.getElementById('sample-count').textContent = shown + ' samples';
+  }
+  filterSamples();
+
+  // Click a header to sort by that column, click again to reverse. Numbers (incl. "88.6%")
+  // sort numerically; blank / "n/a" cells always go last. Filtered-out rows keep their
+  // display state, so sorting and filtering combine.
+  function cellValue(row, index) {
+    const text = row.cells[index].textContent.trim();
+    const number = parseFloat(text.replace('%', ''));
+    if (text === '' || text === 'n/a') return null;
+    return /^-?[0-9.]+%?$/.test(text) ? number : text.toLowerCase();
+  }
+
+  document.querySelectorAll('table.sortable').forEach(table => {
+    const headers = Array.from(table.rows[0].cells);
+    headers.forEach((th, index) => {
+      th.addEventListener('click', () => {
+        const ascending = !th.classList.contains('asc');
+        headers.forEach(h => h.classList.remove('asc', 'desc'));
+        th.classList.add(ascending ? 'asc' : 'desc');
+
+        const rows = Array.from(table.rows).slice(1);
+        rows.sort((a, b) => {
+          const x = cellValue(a, index), y = cellValue(b, index);
+          if (x === null || y === null) return (x === null) - (y === null);
+          const order = (typeof x === 'number' && typeof y === 'number') ? x - y : String(x).localeCompare(String(y), undefined, {numeric: true});
+          return ascending ? order : -order;
+        });
+        const body = rows[0].parentNode;
+        rows.forEach(row => body.appendChild(row));
+      });
+    });
+  });
+</script>
+
+</body>
+</html>

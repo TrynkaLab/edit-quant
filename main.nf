@@ -5,21 +5,35 @@
 // amplicon-manifest row's guides/primers to a reference genome with BWA,
 // extracts the reference amplicon sequence, builds validation/QC reports and
 // a CRISPRessoPooled amplicons file, then runs CRISPRessoPooled per fastq
-// sample against that (deduplicated) amplicons file.
+// sample against the (deduplicated) amplicons of that sample's project_name.
 
 include { validateParameters }              from 'plugin/nf-schema'
+include { checkParamsMain }                  from './lib/checks.nf'
+include { slugifySample }                    from './lib/utils.nf'
 include { FAIDX; BWA_INDEX; GTF_TO_GENEBED } from './modules/local/prepare_reference'
 include { TSV_TO_FASTA }                     from './modules/local/tsv_to_fasta'
 include { BWA_ALN as BWA_ALN_EXACT }         from './modules/local/bwa_align'
 include { BWA_ALN as BWA_ALN_MISMATCH }      from './modules/local/bwa_align'
 include { BUILD_REPORT }                     from './modules/local/build_report'
 include { REASSIGNED_BAM }                   from './modules/local/reassigned_bam'
-include { DEDUP_AMPLICONS }                  from './modules/local/dedup_amplicons'
+include { CHECK_SAMPLES }                    from './modules/local/check_samples'
 include { CRISPRESSO_POOLED }                from './modules/local/crispresso_pooled'
+include { RENDER_REPORT }                    from './modules/local/render_report'
 
 workflow {
 
-    validateParameters()
+    // ------------------------------------------------------------
+    // Check parameters
+    if (params.skip_checks) {
+        log.warn("Skipping parameter checks")
+    } else {
+
+        // Validate parameters plugin
+        validateParameters()
+
+        // Custom parameter checks
+        checkParamsMain(params)
+    }
 
     ch_amplicon_manifest = channel.fromPath(params.amplicon_manifest, checkIfExists: true)
     ch_ref_fasta         = channel.fromPath(params.ref_fasta, checkIfExists: true)
@@ -92,21 +106,51 @@ workflow {
     // corrected at least one position
     REASSIGNED_BAM(build_report_result.reassigned_sam)
 
-    // --- dedup amplicons by sequence (CRISPRessoPooled requires unique amplicon_seq) ---
-    DEDUP_AMPLICONS(build_report_result.crispresso_amplicons)
-    ch_amplicons_unique = DEDUP_AMPLICONS.out.amplicons_unique.first()
+    // --- split amplicons by project_name (deduplicated by sequence, as
+    //     CRISPRessoPooled requires) and match each fastq sample to its project ---
+    CHECK_SAMPLES(
+        channel.fromPath(params.fastq_manifest, checkIfExists: true),
+        ch_amplicon_manifest,
+        build_report_result.crispresso_amplicons,
+    )
 
-    // --- CRISPRessoPooled per fastq sample, against the shared amplicons panel ---
-    // CRISPResso slugifies --name internally (collapses runs of '_' etc. down to a
-    // single '_'), so a sample name containing e.g. a double underscore would make
-    // it write "CRISPRessoPooled_on_<slugified>" while Nextflow still expects the
-    // raw "CRISPRessoPooled_on_<sample>" -- pre-slugify here so both sides agree.
-    ch_fastq = channel.fromPath(params.fastq_manifest, checkIfExists: true)
+    ch_project_amplicons = CHECK_SAMPLES.out.amplicons
+        .flatten()
+        .map { amplicons -> tuple(amplicons.name, amplicons) }
+
+    // Samples without amplicons for their project are skipped with a warning,
+    // rather than screened against another project's panel
+    def skip_reasons = [
+        NO_PROJECT_IN_AMPLICON_MANIFEST: "its project_name has no rows in the amplicon manifest",
+        NO_AMPLICONS_EXTRACTED         : "none of its project's amplicons could be extracted from the reference",
+    ]
+
+    ch_fastq = CHECK_SAMPLES.out.sample_check
         .splitCsv(header: true, sep: '\t')
-        .map { row ->
-            def sample = row.sample.replaceAll(/[\s'*"\/\\\[\]:;|,<>?]/, '_').replaceAll(/_{2,}/, '_')
-            tuple(sample, file(row.fastq_1, checkIfExists: true), file(row.fastq_2, checkIfExists: true))
+        .filter { row ->
+            if (row.status != 'OK') {
+                log.warn("Skipping sample '${row.sample}' (project_name=${row.project_name}): ${skip_reasons[row.status] ?: row.status}")
+                return false
+            }
+            return true
         }
+        .map { row ->
+            tuple(row.amplicons_file, slugifySample(row.sample), file(row.fastq_1, checkIfExists: true), file(row.fastq_2, checkIfExists: true))
+        }
+        .combine(ch_project_amplicons, by: 0)
+        .map { _amplicons_name, sample, fastq_1, fastq_2, amplicons -> tuple(sample, fastq_1, fastq_2, amplicons) }
 
-    CRISPRESSO_POOLED(ch_fastq, ch_amplicons_unique, params.crispresso_n_processes)
+    // --- CRISPRessoPooled per fastq sample, against its project's amplicons ---
+    CRISPRESSO_POOLED(ch_fastq, params.crispresso_n_processes, params.crispresso_min_reads_to_use_region)
+
+    // --- summary report over all samples ---
+    RENDER_REPORT(
+        CRISPRESSO_POOLED.out.results.collect().ifEmpty([]),
+        CHECK_SAMPLES.out.sample_check,
+        CHECK_SAMPLES.out.amplicon_replicates,
+        build_report_result.amplicon_report,
+        ch_amplicon_manifest,
+        file("${projectDir}/assets/report.html.j2"),
+        workflow.manifest.version ?: 'unknown',
+    )
 }
