@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 sys.path.insert(0, os.path.dirname(__file__))
-from pipeline_common import read_rows, rna_to_dna, SEQ_TYPES  # noqa: E402
+from pipeline_common import read_rows, rna_to_dna, dna_upper, is_absent, SEQ_TYPES  # noqa: E402
 
 REF_CONSUMING_OPS = set("MDN=X")
 CIGAR_TOKEN_RE = __import__("re").compile(r"(\d+)([MIDNSHP=X])")
@@ -201,6 +201,54 @@ def find_all(haystack, needle):
         starts.append(i)
         i = haystack.find(needle, i + 1)
     return starts
+
+
+def compare_to_reference(supplied, reference):
+    """How a manifest-supplied amplicon relates to the reference sequence at its
+    primers' coordinates.
+
+    faidx always returns the + strand, while a supplied amplicon is normally
+    written in fwd-primer orientation -- so a design on the minus strand
+    legitimately comes out as the reverse complement of the extraction. That's
+    match_revcomp, not a disagreement about the sequence.
+    """
+    if not reference:
+        return "no_reference"
+    if supplied == reference:
+        return "match"
+    if supplied == revcomp(reference):
+        return "match_revcomp"
+    if reference in supplied or revcomp(reference) in supplied:
+        # a construct carrying the amplicon (cassette, plasmid) rather than a
+        # disagreement about its sequence -- pairs with primers_in_supplied=interior
+        return "contains_reference"
+    return "mismatch"
+
+
+def primers_in_amplicon(amplicon, fwd_primer, rev_primer):
+    """Where a supplied amplicon's own primers sit in it. This is the only check
+    available for one with no reference locus (a transgene or plasmid), and it is
+    what tells a PCR product apart from a larger construct containing it:
+
+        bounds    the primers are at the two ends -- the sequence IS the product
+        interior  both present, but not at the ends -- a construct it sits inside
+        no        at least one primer is missing from the sequence
+        NA        a primer wasn't given, so there's nothing to check
+
+    Both orientations are tried, since the amplicon may be written either way
+    round. Only "no" is a problem; "interior" is information, and is what stops
+    the declared-size check firing on a cassette that is legitimately kilobases
+    longer than the product.
+    """
+    if is_absent(fwd_primer) or is_absent(rev_primer):
+        return "NA"
+    fwd, rev = dna_upper(fwd_primer), dna_upper(rev_primer)
+    for start, end in ((fwd, revcomp(rev)), (rev, revcomp(fwd))):
+        if amplicon.startswith(start) and amplicon.endswith(end):
+            return "bounds"
+    if (fwd in amplicon and revcomp(rev) in amplicon) or (rev in amplicon and revcomp(fwd) in amplicon):
+        return "interior"
+    return "no"
 
 
 def qc_guide(guide, amplicon, pam, qw_center, pam_side="3prime"):
@@ -555,14 +603,22 @@ def apply_reassignment(sample_id, seq_type, position_source, old_primary, match,
 
 
 def extract_fasta_seq(ref_path, fai_path, chrom, start, end):
-    """samtools faidx ref chrom:start-end -> sequence string (no header, no newlines)."""
+    """samtools faidx ref chrom:start-end -> sequence string (no header, no newlines).
+
+    Uppercased: faidx reproduces the reference's own case, and the standard human
+    references (GRCh38 analysis set, Ensembl primary assembly) are soft-masked, so
+    repeats come back lowercase. Everything matched against this sequence --
+    qc_guide's str.find, its PAM check -- is case-sensitive and works from
+    uppercase manifest sequences, so a guide sitting in a soft-masked region would
+    otherwise be reported NOT_IN_AMPLICON and dropped from the CRISPResso file.
+    """
     region = "%s:%d-%d" % (chrom, start, end)
     out = subprocess.run(
         ["samtools", "faidx", "--fai-idx", fai_path, ref_path, region],
         capture_output=True, text=True, check=True,
     )
     lines = out.stdout.splitlines()
-    return "".join(lines[1:]) if lines else ""
+    return "".join(lines[1:]).upper() if lines else ""
 
 
 def resolve_position(sample_id, seq_type, hits_exact, hits_mm):
@@ -719,7 +775,8 @@ def main():
             "sample_id", "gene_name_declared", "gene_id_declared", "chrom",
             "amplicon_start", "amplicon_end", "amplicon_length",
             "declared_amplicon_size", "length_diff", "fwd_strand", "rev_strand",
-            "orientation_ok", "fasta_file", "status",
+            "orientation_ok", "fasta_file", "status", "amplicon_source",
+            "reference_check", "primers_in_supplied", "reference_length",
         ]) + "\n")
 
         oout.write("\t".join([
@@ -767,6 +824,9 @@ def main():
         for sample_id, row in rows.items():
             declared_gene_name = row["gene_name"]
             declared_gene_id = row["gene_id"]
+            # optional amplicon_seq column: absent in manifests written before it
+            # existed, so read_rows yields "" and the reference path below is used
+            supplied_seq = "" if is_absent(row["amplicon_seq"]) else dna_upper(row["amplicon_seq"])
 
             per_type_position = {}  # seq_type -> final Hit (or None)
             per_type_result = {}    # seq_type -> dict of everything needed to write its row, or None if unmapped
@@ -909,7 +969,7 @@ def main():
                 position_source = result["position_source"]
 
                 distance_from_amplicon_start = ""
-                if amp_chrom is not None and p.chrom == amp_chrom:
+                if not supplied_seq and amp_chrom is not None and p.chrom == amp_chrom:
                     midpoint = (p.start + p.end) // 2
                     distance_from_amplicon_start = str(midpoint - amp_start)
 
@@ -943,7 +1003,7 @@ def main():
                         h.strand, str(h.nm), h.source, gene_list_str(h_overlaps),
                     ]) + "\n")
 
-            # --- amplicon extraction ---
+            # --- amplicon sequence: supplied in the manifest, or extracted from the reference ---
             fwd = per_type_position["fwd_primer"]
             rev = per_type_position["rev_primer"]
             declared_size = row.get("amplicon_size", "")
@@ -953,6 +1013,7 @@ def main():
             ext_chrom = ext_start = ext_end = None
             orientation_ok = None
             estimated_from = None
+            failure_status = None
 
             if fwd is not None and rev is not None and amp_chrom is not None:
                 ext_chrom, ext_start, ext_end = amp_chrom, amp_start, amp_end
@@ -978,35 +1039,68 @@ def main():
                         anchor_hit = anchor_result["p"]
                         ext_start, ext_end = estimate_amplicon_bounds(anchor_hit, declared_size_int)
                         ext_chrom = anchor_hit.chrom
-                if ext_chrom is None:
-                    aout.write("\t".join([
-                        sample_id, declared_gene_name, declared_gene_id, "", "", "", "",
-                        declared_size, "", fwd_strand_out, rev_strand_out, "", "", failure_status,
-                    ]) + "\n")
-                    continue
+                        failure_status = None
 
-            ext_len = ext_end - ext_start + 1
+            # The reference extraction still runs for a supplied amplicon wherever the
+            # primers give somewhere to look, so the two can be compared below --
+            # supplying a sequence buys a cross-check rather than disabling one.
+            ref_seq = None
+            if ext_chrom is not None:
+                try:
+                    ref_seq = extract_fasta_seq(args.ref, fai_path, ext_chrom, ext_start, ext_end)
+                except subprocess.CalledProcessError as e:
+                    sys.stderr.write("ERROR extracting %s: %s\n" % (sample_id, e.stderr))
+                    failure_status = "FAIDX_ERROR"
 
-            try:
-                seq = extract_fasta_seq(args.ref, fai_path, ext_chrom, ext_start, ext_end)
-            except subprocess.CalledProcessError as e:
-                aout.write("\t".join([
-                    sample_id, declared_gene_name, declared_gene_id, ext_chrom,
-                    str(ext_start), str(ext_end), str(ext_len), declared_size, "",
-                    fwd_strand_out, rev_strand_out, str(orientation_ok), "", "FAIDX_ERROR",
-                ]) + "\n")
-                sys.stderr.write("ERROR extracting %s: %s\n" % (sample_id, e.stderr))
+            if supplied_seq:
+                seq = supplied_seq
+                amplicon_source = "manifest"
+                reference_check = compare_to_reference(supplied_seq, ref_seq)
+                primers_in_supplied = primers_in_amplicon(seq, row["fwd_primer"], row["rev_primer"])
+            else:
+                seq = ref_seq or ""
+                amplicon_source = "reference"
+                reference_check = "NA"
+                primers_in_supplied = "NA"
+
+            reference_length = "" if ref_seq is None else str(len(ref_seq))
+
+            def amplicon_row(status, fasta_file="", length_diff=""):
+                """One reports/amplicon_report.tsv row. Shared by the failure and
+                success paths so the two can't drift apart as columns are added."""
+                return "\t".join([
+                    sample_id, declared_gene_name, declared_gene_id,
+                    ext_chrom or "",
+                    str(ext_start) if ext_start is not None else "",
+                    str(ext_end) if ext_end is not None else "",
+                    str(len(seq)) if seq else "",
+                    declared_size, length_diff, fwd_strand_out, rev_strand_out,
+                    "" if orientation_ok is None else str(orientation_ok),
+                    fasta_file, status, amplicon_source, reference_check,
+                    primers_in_supplied, reference_length,
+                ]) + "\n"
+
+            if not seq:
+                # No usable sequence from either source. An empty (rather than failed)
+                # extraction is its own case: samtools exits 0 for a region past the end
+                # of a contig, and an empty amplicon would otherwise collapse every such
+                # row in a project into one group in check_samples.py.
+                aout.write(amplicon_row(failure_status or "EMPTY_AMPLICON"))
                 continue
 
             fasta_name = "%s.fa" % sample_id
             fasta_path = os.path.join(amplicons_dir, fasta_name)
-            extra_hdr = (
-                "estimated_from=%s" % estimated_from if estimated_from
-                else "orientation_ok=%s" % orientation_ok
-            )
-            header = ">%s|%s|%s:%d-%d|len=%d|declared=%s|%s" % (
-                sample_id, declared_gene_name, ext_chrom, ext_start, ext_end, ext_len,
-                declared_size, extra_hdr,
+            if amplicon_source == "manifest":
+                extra_hdr = "source=manifest,reference_check=%s" % reference_check
+            elif estimated_from:
+                extra_hdr = "estimated_from=%s" % estimated_from
+            else:
+                extra_hdr = "orientation_ok=%s" % orientation_ok
+            # the locus slot holds no_locus rather than coordinates for a supplied
+            # amplicon with no reference position, so the header never claims one
+            locus = "%s:%d-%d" % (ext_chrom, ext_start, ext_end) if ext_chrom is not None else "no_locus"
+            header = ">%s|%s|%s|len=%d|declared=%s|%s" % (
+                sample_id, declared_gene_name, locus, len(seq), declared_size, extra_hdr,
             )
             with open(fasta_path, "w") as sfout:
                 sfout.write(header + "\n" + seq + "\n")
@@ -1023,9 +1117,9 @@ def main():
             # rather than passed for it to warn about and ignore.
             guide_seqs = []
             for guide_type in ("guide1", "guide2", "guide3"):
-                guide = rna_to_dna(row[guide_type])
-                if not guide or guide == "NA":
+                if is_absent(row[guide_type]):
                     continue
+                guide = rna_to_dna(row[guide_type])
                 qc = qc_guide(guide, seq, args.pam, args.quantification_window_center, args.pam_side)
                 passed = qc["status"] != "NOT_IN_AMPLICON"
                 if passed:
@@ -1044,14 +1138,34 @@ def main():
             ]) + "\n")
             n_crispresso += 1
 
+            # The length check only means something where the sequence claims to BE the
+            # PCR product -- "bounds". A cassette the primers merely sit inside
+            # ("interior") is legitimately kilobases longer than amplicon_size.
+            length_comparable = amplicon_source == "reference" or primers_in_supplied == "bounds"
             length_diff = ""
-            if declared_size:
+            if declared_size and length_comparable:
                 try:
-                    length_diff = str(ext_len - int(declared_size))
+                    length_diff = str(len(seq) - int(declared_size))
                 except ValueError:
                     pass
 
-            if estimated_from:
+            if amplicon_source == "manifest":
+                # amplicon_source / reference_check / primers_in_supplied carry the full
+                # picture; status is just the headline, so a row with two problems is
+                # still fully described by its columns.
+                if reference_check == "mismatch":
+                    status = "SUPPLIED_DIFFERS_FROM_REFERENCE"
+                elif primers_in_supplied == "no":
+                    status = "SUPPLIED_PRIMERS_NOT_FOUND"
+                elif length_diff not in ("", "0"):
+                    status = "LENGTH_MISMATCH"
+                else:
+                    status = "OK"
+                if status == "OK":
+                    n_amplicons_ok += 1
+                else:
+                    n_flagged += 1
+            elif estimated_from:
                 status = "AMPLICON_ESTIMATED_FROM_%s" % estimated_from.upper()
                 n_estimated += 1
                 n_flagged += 1
@@ -1068,12 +1182,7 @@ def main():
                 else:
                     n_flagged += 1
 
-            aout.write("\t".join([
-                sample_id, declared_gene_name, declared_gene_id, ext_chrom,
-                str(ext_start), str(ext_end), str(ext_len), declared_size, length_diff,
-                fwd_strand_out, rev_strand_out, str(orientation_ok) if orientation_ok is not None else "",
-                fasta_name, status,
-            ]) + "\n")
+            aout.write(amplicon_row(status, fasta_name, length_diff))
 
     # Guide QC, in manifest order. Rows were buffered above as each amplicon was
     # extracted; a guide whose amplicon never was can't be checked at all, so it
@@ -1091,9 +1200,9 @@ def main():
                     gout.write("\t".join(qc_row) + "\n")
                 continue
             for guide_type in ("guide1", "guide2", "guide3"):
-                guide = rna_to_dna(row[guide_type])
-                if not guide or guide == "NA":
+                if is_absent(row[guide_type]):
                     continue
+                guide = rna_to_dna(row[guide_type])
                 n_guides_no_amplicon += 1
                 gout.write("\t".join([
                     sample_id, row["gene_name"], row["gene_id"], guide_type, guide,

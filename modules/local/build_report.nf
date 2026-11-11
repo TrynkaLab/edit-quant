@@ -3,6 +3,8 @@
 // extracted amplicon FASTAs, and the CRISPRessoPooled amplicons description
 // file. See the README for the full column/status-code documentation.
 
+include { asBool } from '../../lib/utils.nf'
+
 process BUILD_REPORT {
     tag "${amplicon_manifest.name}"
     label 'normal_plus'
@@ -38,7 +40,7 @@ process BUILD_REPORT {
 
     script:
     def exon_arg     = (exon_bed.name != 'NO_FILE.bed') ? "--exon-bed ${exon_bed}" : ''
-    def reassign_arg = reassign_primary ? '--reassign-primary' : ''
+    def reassign_arg = asBool(reassign_primary) ? '--reassign-primary' : ''
     """
     build_report.py \\
         --tsv ${amplicon_manifest} \\

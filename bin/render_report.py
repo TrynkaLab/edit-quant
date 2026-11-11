@@ -275,12 +275,15 @@ def build_design_tab(amplicons, guides, pam, pam_side, qw_center):
     it at the far end of the protospacer, so the edit % below is measured in the
     wrong place rather than being obviously absent."""
     n_amplicons_pass = int(amplicons["status"].isin(AMPLICON_PASS).sum())
+    n_supplied = int((amplicons.get("amplicon_source", pd.Series(dtype=str)) == "manifest").sum())
     n_guides_pass = int(guides["status"].isin(GUIDE_PASS).sum())
     n_guides_passed_on = int((guides["passed_to_crispresso"] == "yes").sum())
 
     amplicon_cols = ["sample_id", "project_name", "plate_name", "well", "gene_name_declared",
                      "chrom", "amplicon_start", "amplicon_end", "amplicon_length",
-                     "declared_amplicon_size", "length_diff", "orientation_ok", "status"]
+                     "declared_amplicon_size", "length_diff", "orientation_ok",
+                     "amplicon_source", "reference_check", "primers_in_supplied",
+                     "reference_length", "status"]
     guide_cols = ["sample_id", "project_name", "plate_name", "well", "gene_name_declared",
                   "seq_type", "guide_seq", "strand_in_amplicon", "match_start", "n_fwd_matches",
                   "n_rc_matches", "pam_seq", "cut_index", "passed_to_crispresso", "status"]
@@ -293,6 +296,7 @@ def build_design_tab(amplicons, guides, pam, pam_side, qw_center):
             "n_total": len(amplicons),
             "n_pass": n_amplicons_pass,
             "n_flagged": len(amplicons) - n_amplicons_pass,
+            "n_supplied": n_supplied,
             "counts": status_counts(amplicons, AMPLICON_PASS),
             "pass_statuses": sorted(AMPLICON_PASS),
             "rows": amplicons.reindex(columns=amplicon_cols).fillna("").to_dict("records"),

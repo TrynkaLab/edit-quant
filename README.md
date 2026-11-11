@@ -24,6 +24,17 @@ guide1, guide2, guide3, amplicon_size, fwd_primer, rev_primer`. Guides are
 given as RNA (`U`) and converted to DNA; primers are the plain
 `fwd_primer`/`rev_primer` columns (not adaptor-tagged `final_*` columns).
 
+One optional column is recognised: **`amplicon_seq`** (also accepted as
+`amplicon_sequence`). Supply it to use a known amplicon sequence instead of
+extracting one from the reference — for amplicons with no genomic locus
+(transgenes, plasmids, integrated constructs), or whose true sequence differs
+from the reference. A supplied sequence always wins, but where the primers
+also map the reference sequence is still extracted and compared, and any
+disagreement is flagged in `reports/amplicon_report.tsv` and the report's
+Design QC tab. Primers may be `NA` on rows that supply a sequence; a row with
+neither a usable primer pair nor an `amplicon_seq` is warned about and
+produces no amplicon.
+
 ### `--fastq_manifest` (required)
 
 Tab-separated, header row required. Columns `sample`, `project_name`,
@@ -70,6 +81,7 @@ doesn't apply. `--skip_checks` turns these checks off.
 | `guide_pam_side` | no | default `3prime` — which end of the protospacer that PAM sits at; `5prime` for Cas12a/Cpf1 |
 | `quantification_window_center` | no | default `-3` — CRISPResso's `-wc`, mirrored to report each guide's cut index; `1` for Cas12a/Cpf1. Reporting only, not passed to CRISPResso |
 | `crispresso_n_processes` | no | default `1` |
+| `crispresso_skip_failed` | no | default `true` — pass `--skip_failed` to CRISPRessoPooled, so an amplicon that errors is dropped and the rest of the sample's panel still runs. Skipped amplicons show up as `not_tested` (`missing_from_output`) in the report |
 | `crispresso_min_reads_to_use_region` | no | default `100` — CRISPRessoPooled skips amplicons with fewer assigned reads (CRISPResso's own default, 1000, left ~1/3 of amplicons unanalysed); keep in line with `report_min_reads` |
 | `report_edit_threshold` | no | default `50` — edit % at or above which a tested pair is a successful edit |
 | `report_wt_max_edit` | no | default `10` — edit % at or below which a tested WT pair is `success_wt` (no editing); above it the pair fails |
@@ -151,7 +163,17 @@ the script are Sanger-farm-specific — adjust for your own installation.
   orientation QC. When a primer has several equally-good hits that all pass
   the gene/orientation checks (e.g. it sits in a tandem repeat), the hit
   giving the length closest to `amplicon_size` is used; any remaining
-  mismatch with `amplicon_size` is flagged `LENGTH_MISMATCH` instead of `OK`
+  mismatch with `amplicon_size` is flagged `LENGTH_MISMATCH` instead of `OK`.
+  `amplicon_source` says whether the sequence came from the `reference` or the
+  manifest's `amplicon_seq` column. For a supplied sequence, `reference_check`
+  compares it with the reference at the primers' coordinates — `match`,
+  `match_revcomp` (a minus-strand design, which reads as the reverse complement
+  of the plus-strand extraction), `contains_reference` (a construct carrying the
+  amplicon), `mismatch`, or `no_reference` — alongside `reference_length` so a
+  mismatch can be sized; `primers_in_supplied` says whether the sequence *is*
+  the PCR product (`bounds`) or merely contains it (`interior`), and the
+  declared-size check only applies to the former. Supplied-sequence statuses:
+  `SUPPLIED_DIFFERS_FROM_REFERENCE`, `SUPPLIED_PRIMERS_NOT_FOUND`
 - `reports/guide_qc.tsv` — per designed guide: where (and on which strand) it
   matches its extracted amplicon, the PAM-proximal flank, the cut index
   CRISPResso will derive, whether it was passed to CRISPResso, and a status.
@@ -172,8 +194,10 @@ the script are Sanger-farm-specific — adjust for your own installation.
   guides from the manifest (U→T), passed through as written so the orientation
   the design carries reaches CRISPResso intact; guides flagged
   `NOT_IN_AMPLICON` in `guide_qc.tsv` are left out
-- `amplicons/<sample_id>.fa`, `amplicons/all_amplicons.fasta` — extracted
-  reference amplicon sequences
+- `amplicons/<sample_id>.fa`, `amplicons/all_amplicons.fasta` — the amplicon
+  sequence used for each sample, extracted from the reference or taken from the
+  manifest's `amplicon_seq`. The header's coordinate field reads `no_locus` for
+  a supplied sequence with no reference position
 - `reports/sample_check.tsv` — per fastq-manifest sample: project, donor,
   number of amplicons and status (`OK`, `NO_PROJECT_IN_AMPLICON_MANIFEST`,
   `NO_AMPLICONS_EXTRACTED`); only `OK` samples are run

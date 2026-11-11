@@ -9,7 +9,7 @@
 
 include { validateParameters }              from 'plugin/nf-schema'
 include { checkParamsMain }                  from './lib/checks.nf'
-include { slugifySample }                    from './lib/utils.nf'
+include { slugifySample; asBool }            from './lib/utils.nf'
 include { FAIDX; BWA_INDEX; GTF_TO_GENEBED } from './modules/local/prepare_reference'
 include { TSV_TO_FASTA }                     from './modules/local/tsv_to_fasta'
 include { BWA_ALN as BWA_ALN_EXACT }         from './modules/local/bwa_align'
@@ -24,7 +24,7 @@ workflow {
 
     // ------------------------------------------------------------
     // Check parameters
-    if (params.skip_checks) {
+    if (asBool(params.skip_checks)) {
         log.warn("Skipping parameter checks")
     } else {
 
@@ -125,7 +125,7 @@ workflow {
     // rather than screened against another project's panel
     def skip_reasons = [
         NO_PROJECT_IN_AMPLICON_MANIFEST: "its project_name has no rows in the amplicon manifest",
-        NO_AMPLICONS_EXTRACTED         : "none of its project's amplicons could be extracted from the reference",
+        NO_AMPLICONS_EXTRACTED         : "none of its project's amplicons could be extracted from the reference or supplied in the manifest",
     ]
 
     ch_fastq = CHECK_SAMPLES.out.sample_check
@@ -144,7 +144,12 @@ workflow {
         .map { _amplicons_name, sample, fastq_1, fastq_2, amplicons -> tuple(sample, fastq_1, fastq_2, amplicons) }
 
     // --- CRISPRessoPooled per fastq sample, against its project's amplicons ---
-    CRISPRESSO_POOLED(ch_fastq, params.crispresso_n_processes, params.crispresso_min_reads_to_use_region)
+    CRISPRESSO_POOLED(
+        ch_fastq,
+        params.crispresso_n_processes,
+        params.crispresso_min_reads_to_use_region,
+        params.crispresso_skip_failed,
+    )
 
     // --- summary report over all samples ---
     RENDER_REPORT(

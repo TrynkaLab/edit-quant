@@ -15,7 +15,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.dirname(__file__))
-from pipeline_common import read_rows, rna_to_dna, dna_upper, SEQ_TYPES  # noqa: E402
+from pipeline_common import read_rows, rna_to_dna, dna_upper, is_absent, SEQ_TYPES  # noqa: E402
 
 VALID_BASES = set("ACGTN")
 
@@ -32,7 +32,10 @@ def main():
         n_rows += 1
         for seq_type in SEQ_TYPES:
             raw = row.get(seq_type, "")
-            if not raw:
+            # is_absent, not a plain emptiness test: "NA" is what the design sheets
+            # carry for a sequence that doesn't exist, and both N and A are valid
+            # bases, so it would otherwise align as a real 2 bp query.
+            if is_absent(raw):
                 sys.stderr.write(
                     "WARNING line %s: sample %s has no sequence for %s, skipping\n"
                     % (row["_lineno"], sid, seq_type)

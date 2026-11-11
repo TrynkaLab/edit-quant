@@ -37,10 +37,13 @@ def checkParamsManifests(params) {
             error("Specified amplicon manifest does not exist or is not readable: ${params.amplicon_manifest}")
         }
 
-        def ampliconErrors = validateAmpliconManifestContent(params.amplicon_manifest.toString())
-        if (ampliconErrors) {
-            error(formatValidationErrors("amplicon_manifest", ampliconErrors))
+        def amplicon = validateAmpliconManifestContent(params.amplicon_manifest.toString())
+        if (amplicon.errors) {
+            error(formatValidationErrors("amplicon_manifest", amplicon.errors))
         }
+        // rows that can't produce an amplicon are reported, not fatal -- see
+        // validateAmpliconManifestContent
+        amplicon.warnings.each { warning -> log.warn("amplicon_manifest: ${warning}") }
 
         if (params.fastq_manifest == null) {
             error "fastq_manifest file parameter is required: --fastq_manifest"

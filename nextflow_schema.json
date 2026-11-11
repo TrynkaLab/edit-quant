@@ -15,7 +15,7 @@
                     "format": "file-path",
                     "exists": true,
                     "description": "Tab-separated amplicon design manifest (gene/guide/primer columns).",
-                    "help_text": "Header row required. Column names are matched after stripping punctuation/case (guide_.1/guide_1/Guide1 all work): project_name, plate_name, well_position, gene_name, gene_id, species, guide1, guide2, guide3, amplicon_size, fwd_primer, rev_primer. Guides are given as RNA (U) and converted to DNA; primers are the plain fwd_primer/rev_primer columns (not adaptor-tagged final_* columns).",
+                    "help_text": "Header row required. Column names are matched after stripping punctuation/case (guide_.1/guide_1/Guide1 all work): project_name, plate_name, well_position, gene_name, gene_id, species, guide1, guide2, guide3, amplicon_size, fwd_primer, rev_primer. Guides are given as RNA (U) and converted to DNA; primers are the plain fwd_primer/rev_primer columns (not adaptor-tagged final_* columns). One optional column is recognised: amplicon_seq (also accepted as amplicon_sequence), a known amplicon sequence used instead of extracting one from the reference. A supplied sequence always wins, but where the primers also map the reference is still extracted and compared, and disagreements are flagged in reports/amplicon_report.tsv. Primers may be NA on rows that supply a sequence.",
                     "fa_icon": "fas fa-file-csv"
                 },
                 "fastq_manifest": {
@@ -184,6 +184,12 @@
                     "minimum": 1,
                     "description": "Minimum reads assigned to an amplicon for CRISPRessoPooled to analyse it (min_reads_to_use_region; CRISPResso's own default is 1000). Amplicons below this appear as not_aligned in the report.",
                     "fa_icon": "fas fa-sliders-h"
+                },
+                "crispresso_skip_failed": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Pass --skip_failed to CRISPRessoPooled so one failing amplicon doesn't fail the whole sample.",
+                    "help_text": "With this on, an amplicon CRISPResso errors on is dropped and the rest of that sample's panel is still quantified. The skipped amplicon is absent from CRISPResso's output, which the report counts as not_tested (missing_from_output), so it is reported rather than lost. Turn it off to have a single failing amplicon fail the sample's CRISPRessoPooled task."
                 }
             }
         },

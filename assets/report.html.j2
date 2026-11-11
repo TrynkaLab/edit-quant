@@ -148,18 +148,26 @@
 <!-- ==================== Tab 2: Design QC ==================== -->
 <section id="tab-design" class="tab-content">
   <h2>Design QC</h2>
-  <p class="note">What CRISPResso was handed for each design well, before any read was counted: the amplicon extracted
-  from the reference, and whether each designed guide can be found in that amplicon the right way round. A guide
+  <p class="note">What CRISPResso was handed for each design well, before any read was counted: the amplicon &mdash;
+  extracted from the reference, or taken from the manifest's <code>amplicon_seq</code> column where one was supplied
+  &mdash; and whether each designed guide can be found in that amplicon the right way round. A guide
   CRISPResso cannot find is ignored, leaving the quantification window spanning the whole amplicon; one written as the
   reverse complement of the designed protospacer still matches, silently, but puts the window at the far end of the
   guide. Either way the edit % on the other tabs is measured in the wrong place rather than being obviously missing.</p>
 
   <h3>Amplicons</h3>
   {% set a = design.amplicons %}
+  <p class="note">A supplied <code>amplicon_seq</code> always wins, but where the primers also map the reference
+  sequence is still extracted and compared: <code>match</code> / <code>match_revcomp</code> (the design is on the minus
+  strand, so it reads as the reverse complement of the plus-strand extraction) agree, <code>contains_reference</code>
+  is a construct carrying the amplicon, and <code>mismatch</code> is a real disagreement. "Primers in sequence" says
+  whether the supplied sequence <em>is</em> the PCR product (<code>bounds</code>) or merely contains it
+  (<code>interior</code>); the declared-size check only applies to the former.</p>
   <div class="stats-box">
     <div class="metrics">
       <div class="metric hero"><div class="value">{{ a.n_pass }}</div><div class="label">Amplicons extracted OK (of {{ a.n_total }} design wells)</div></div>
       <div class="metric"><div class="value">{{ a.n_flagged }}</div><div class="label">Flagged</div></div>
+      <div class="metric"><div class="value">{{ a.n_supplied }}</div><div class="label">Supplied in manifest</div></div>
     {% for c in a.counts %}
       <div class="metric"><div class="value">{{ c.n }}</div><div class="label">{{ c.status }}</div></div>
     {% endfor %}
@@ -177,14 +185,16 @@
   <div class="table-scroll">
   <table class="data sortable" id="amplicon-table">
     <tr><th>Amplicon</th><th>Project</th><th>Plate</th><th>Well</th><th>Gene</th><th>Chrom</th><th>Start</th><th>End</th>
-      <th>Length</th><th>Declared</th><th>Diff</th><th>Primer orientation</th><th>Status</th></tr>
+      <th>Length</th><th>Declared</th><th>Diff</th><th>Primer orientation</th><th>Source</th><th>vs reference</th>
+      <th>Primers in sequence</th><th>Reference length</th><th>Status</th></tr>
   {% for r in a.rows %}
     <tr data-status="{{ r.status }}" data-pass="{{ 'yes' if r.status in a.pass_statuses else 'no' }}">
       <td>{{ r.sample_id }}</td><td>{{ r.project_name }}</td><td>{{ r.plate_name }}</td><td>{{ r.well }}</td>
       <td>{{ r.gene_name_declared }}</td><td>{{ r.chrom }}</td><td class="num">{{ r.amplicon_start }}</td>
       <td class="num">{{ r.amplicon_end }}</td><td class="num">{{ r.amplicon_length }}</td>
       <td class="num">{{ r.declared_amplicon_size }}</td><td class="num">{{ r.length_diff }}</td>
-      <td>{{ r.orientation_ok }}</td>
+      <td>{{ r.orientation_ok }}</td><td>{{ r.amplicon_source }}</td><td>{{ r.reference_check }}</td>
+      <td>{{ r.primers_in_supplied }}</td><td class="num">{{ r.reference_length }}</td>
       <td><span class="status {{ 'pass' if r.status in a.pass_statuses else 'flagged' }}">{{ r.status }}</span></td></tr>
   {% endfor %}
   </table>

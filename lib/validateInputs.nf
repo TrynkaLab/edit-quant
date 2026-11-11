@@ -75,6 +75,9 @@ def validateAmpliconManifestContent(String path) {
         guide1: "guide1", guide2: "guide2", guide3: "guide3",
         amplicon_size: "ampliconsize", fwd_primer: "fwdprimer", rev_primer: "revprimer"
     ]
+    // Optional: absent in manifests written before the column existed, so a missing
+    // header is not an error. Mirrors bin/pipeline_common.py OPTIONAL_FIELD_KEYS.
+    def OPTIONAL_AMPLICON_COLUMNS = [amplicon_seq: ["ampliconseq", "ampliconsequence"]]
     // guides/primers may legitimately be NA (e.g. non-targeting controls have no amplicon)
     def REQUIRED_VALUES = ["project_name", "plate_name", "well_position", "gene_name"]
 
@@ -88,8 +91,13 @@ def validateAmpliconManifestContent(String path) {
         return ["header is missing required column(s) ${missing} (matched ignoring case/punctuation). Found: ${header}".toString()]
     }
     def colIndex = AMPLICON_COLUMNS.collectEntries { logical, key -> [(logical): normIndex[key]] }
+    OPTIONAL_AMPLICON_COLUMNS.each { logical, keys ->
+        def key = keys.find { k -> normIndex.containsKey(k) }
+        if (key != null) colIndex[logical] = normIndex[key]
+    }
 
     def errors = []
+    def warnings = []
     def sanitizedProjects = [:].withDefault { [] as Set }
 
     rows.each { rowNum, fields ->
@@ -102,6 +110,23 @@ def validateAmpliconManifestContent(String path) {
 
         def rowErrors = REQUIRED_VALUES.collect { col -> checkRequired(fields[colIndex[col]], null, col, "") }
         rowErrors.findAll { it != null }.each { errors << "${context}: ${it}".toString() }
+
+        // A supplied amplicon_seq is what every edit % for the row gets measured
+        // against, so a mis-pasted cell is worth failing on rather than aligning.
+        def suppliedSeq = colIndex.amplicon_seq == null ? "" : fields[colIndex.amplicon_seq]
+        def hasSuppliedSeq = !isBlankish(suppliedSeq)
+        if (hasSuppliedSeq && !(suppliedSeq.toUpperCase() ==~ /^[ACGTN]+$/)) {
+            def shown = suppliedSeq.size() > 40 ? "${suppliedSeq.take(40)}... (${suppliedSeq.size()} chars)" : suppliedSeq
+            errors << "${context}: amplicon_seq '${shown}' contains characters other than ACGTN".toString()
+        }
+
+        // Warn rather than error: a row with no primers and no sequence yields no
+        // amplicon, which is how non-targeting controls are legitimately expressed.
+        // It just can't be quantified, so say so up front instead of failing the run.
+        def hasPrimers = !isBlankish(fields[colIndex.fwd_primer]) && !isBlankish(fields[colIndex.rev_primer])
+        if (!hasPrimers && !hasSuppliedSeq) {
+            warnings << "${context}: no usable primer pair and no amplicon_seq - no amplicon can be built for this row".toString()
+        }
 
         if (!isBlankish(project)) sanitizedProjects[sanitizeName(project)] << project
     }
@@ -116,7 +141,7 @@ def validateAmpliconManifestContent(String path) {
         errors << "project_name values ${projects.sort()} all map to the same name '${name}' once special characters are replaced - rename one of them".toString()
     }
 
-    return errors
+    return [errors: errors, warnings: warnings]
 }
 
 // Fastq manifest: one row per sample, linked to the amplicon manifest by project_name

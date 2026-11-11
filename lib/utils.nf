@@ -19,3 +19,10 @@ def sanitizeName(String name) {
 def normaliseHeader(String header) {
     return header.toLowerCase().replaceAll(/[^a-z0-9]/, '')
 }
+
+// A boolean param given on the command line (--foo false) arrives as the String
+// "false", which is truthy in Groovy -- so testing one directly makes
+// "--foo false" behave exactly like "--foo true". Coerce before testing.
+def asBool(value) {
+    return value instanceof Boolean ? value : value.toString().toBoolean()
+}

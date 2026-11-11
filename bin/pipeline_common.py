@@ -24,8 +24,27 @@ FIELD_KEYS = {
     "rev_primer": "revprimer",
 }
 
+# Columns that may be absent entirely. Unlike FIELD_KEYS, a missing one is not an
+# error -- read_rows yields "" for it -- so adding a column here doesn't invalidate
+# every manifest written before it existed. Each maps to the normalized header keys
+# it accepts, most canonical first.
+OPTIONAL_FIELD_KEYS = {
+    "amplicon_seq": ["ampliconseq", "ampliconsequence"],
+}
+
 # the five sequences we align per row, in output order
 SEQ_TYPES = ["guide1", "guide2", "guide3", "fwd_primer", "rev_primer"]
+
+# Values meaning "deliberately not set". The manifests document 'none' as the
+# sentinel, but 'NA' is what the design sheets actually carry, so both are honoured
+# -- along with the other spellings lib/validateInputs.nf BLANKISH() rejects, so the
+# two layers agree on what counts as absent.
+ABSENT_VALUES = {"", "na", "n/a", "none", "null", "nan"}
+
+
+def is_absent(value):
+    """True if a manifest cell holds no usable value (empty or a 'not set' marker)."""
+    return value is None or value.strip().lower() in ABSENT_VALUES
 
 
 def _normalize(header):
@@ -33,7 +52,11 @@ def _normalize(header):
 
 
 def build_column_map(fieldnames):
-    """Map logical field name -> actual column name in this TSV's header."""
+    """Map logical field name -> actual column name in this TSV's header.
+
+    Optional columns are left out of the map when absent; read_rows fills them in
+    as "" so callers can read them unconditionally without a KeyError.
+    """
     norm_to_actual = {_normalize(h): h for h in fieldnames}
     colmap = {}
     missing = []
@@ -47,6 +70,11 @@ def build_column_map(fieldnames):
             "Could not find columns for: %s\nAvailable headers: %s"
             % (", ".join(missing), ", ".join(fieldnames))
         )
+    for logical, keys in OPTIONAL_FIELD_KEYS.items():
+        for key in keys:
+            if key in norm_to_actual:
+                colmap[logical] = norm_to_actual[key]
+                break
     return colmap
 
 
@@ -59,8 +87,9 @@ def read_rows(tsv_path):
         colmap = build_column_map(reader.fieldnames)
         for lineno, raw_row in enumerate(reader, start=2):
             row = {}
-            for logical, actual in colmap.items():
-                val = raw_row.get(actual)
+            for logical in list(FIELD_KEYS) + list(OPTIONAL_FIELD_KEYS):
+                actual = colmap.get(logical)
+                val = raw_row.get(actual) if actual is not None else None
                 row[logical] = val.strip() if val is not None else ""
             if not any(row.values()):
                 continue  # skip blank lines
