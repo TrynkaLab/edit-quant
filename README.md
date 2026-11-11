@@ -66,6 +66,9 @@ doesn't apply. `--skip_checks` turns these checks off.
 | `gene_window` | no | default `500` — bp padding around genes for overlap checks |
 | `high_copy_threshold` | no | default `50` — flags `HIGH_COPY_NUMBER` above this many tied-best hits |
 | `reassign_primary` | no | default `true` — promote gene-matching tied alternates to primary |
+| `guide_pam` | no | default `NGG` — PAM adjacent to each guide (IUPAC) for the `guide_qc.tsv` orientation check; `TTTV` for Cas12a/Cpf1 |
+| `guide_pam_side` | no | default `3prime` — which end of the protospacer that PAM sits at; `5prime` for Cas12a/Cpf1 |
+| `quantification_window_center` | no | default `-3` — CRISPResso's `-wc`, mirrored to report each guide's cut index; `1` for Cas12a/Cpf1. Reporting only, not passed to CRISPResso |
 | `crispresso_n_processes` | no | default `1` |
 | `crispresso_min_reads_to_use_region` | no | default `100` — CRISPRessoPooled skips amplicons with fewer assigned reads (CRISPResso's own default, 1000, left ~1/3 of amplicons unanalysed); keep in line with `report_min_reads` |
 | `report_edit_threshold` | no | default `50` — edit % at or above which a tested pair is a successful edit |
@@ -149,10 +152,26 @@ the script are Sanger-farm-specific — adjust for your own installation.
   the gene/orientation checks (e.g. it sits in a tandem repeat), the hit
   giving the length closest to `amplicon_size` is used; any remaining
   mismatch with `amplicon_size` is flagged `LENGTH_MISMATCH` instead of `OK`
+- `reports/guide_qc.tsv` — per designed guide: where (and on which strand) it
+  matches its extracted amplicon, the PAM-proximal flank, the cut index
+  CRISPResso will derive, whether it was passed to CRISPResso, and a status.
+  CRISPResso accepts a guide on either strand of the amplicon, but reads it as
+  the protospacer 5'->3' with the PAM immediately 3' of it, so the sequence
+  must be the designed spacer and not its reverse complement — it matches
+  either way round, without warning, and silently places the quantification
+  window at the wrong end of the guide (~14 bp out for a 20mer at `-wc -3`).
+  Statuses: `OK`, `PAM_ON_WRONG_END` (the manifest holds the reverse complement
+  of the designed protospacer), `NO_PAM`, `PAM_OUTSIDE_AMPLICON` (guide runs up
+  against the amplicon edge), `MULTIPLE_MATCHES`, `NOT_IN_AMPLICON` (dropped
+  from the CRISPResso amplicons file, since CRISPResso would warn and ignore
+  it anyway, widening the window to the whole amplicon) and `NO_AMPLICON`
 - `reports/off_targets.tsv` — additional low-edit-distance hits
 - `reports/reassigned_primaries.tsv` — log of every tie-break correction
 - `reports/crispresso_amplicons.txt` — CRISPRessoPooled amplicons file (one
-  row per sample whose amplicon was extracted)
+  row per sample whose amplicon was extracted). `guide_seq` holds the designed
+  guides from the manifest (U→T), passed through as written so the orientation
+  the design carries reaches CRISPResso intact; guides flagged
+  `NOT_IN_AMPLICON` in `guide_qc.tsv` are left out
 - `amplicons/<sample_id>.fa`, `amplicons/all_amplicons.fasta` — extracted
   reference amplicon sequences
 - `reports/sample_check.tsv` — per fastq-manifest sample: project, donor,

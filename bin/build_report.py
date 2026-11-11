@@ -3,6 +3,7 @@
 
   - reports/validation_report.tsv    one row per guide/primer: position, gene overlap
   - reports/amplicon_report.tsv      one row per sample: amplicon coordinates & QC
+  - reports/guide_qc.tsv             one row per guide: orientation/PAM check vs its amplicon
   - reports/off_targets.tsv          additional high-quality (low edit-distance) hits
   - reports/reassigned_primaries.tsv every position corrected to a gene-matching tie
   - reports/crispresso_amplicons.txt CRISPRessoPooled amplicon description file
@@ -35,7 +36,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 sys.path.insert(0, os.path.dirname(__file__))
-from pipeline_common import read_rows, SEQ_TYPES  # noqa: E402
+from pipeline_common import read_rows, rna_to_dna, SEQ_TYPES  # noqa: E402
 
 REF_CONSUMING_OPS = set("MDN=X")
 CIGAR_TOKEN_RE = __import__("re").compile(r"(\d+)([MIDNSHP=X])")
@@ -164,6 +165,113 @@ def format_xa(alt_hits):
 
 def revcomp(seq):
     return seq.translate(str.maketrans("ACGTNacgtn", "TGCANtgcan"))[::-1]
+
+
+IUPAC = {
+    "A": "A", "C": "C", "G": "G", "T": "T",
+    "R": "AG", "Y": "CT", "S": "CG", "W": "AT", "K": "GT", "M": "AC",
+    "B": "CGT", "D": "AGT", "H": "ACT", "V": "ACG", "N": "ACGT",
+}
+
+
+IUPAC_COMPLEMENT = str.maketrans(
+    "ACGTRYSWKMBDHVNacgtryswkmbdhvn",
+    "TGCAYRSWMKVHDBNtgcayrswmkvhdbn",
+)
+
+
+def revcomp_pam(pam):
+    """Reverse complement of an IUPAC PAM code. revcomp() only knows ACGTN, so it
+    would leave the ambiguity codes untouched -- revcomp("TTTV") is "BAAA", not
+    "VAAA", and a Cas12a PAM checked with the latter never matches."""
+    return pam.translate(IUPAC_COMPLEMENT)[::-1]
+
+
+def matches_pam(seq, pam):
+    """True if `seq` satisfies the IUPAC code `pam` (e.g. "AGG" vs "NGG")."""
+    return len(seq) == len(pam) and all(
+        base in IUPAC.get(code, "") for base, code in zip(seq, pam)
+    )
+
+
+def find_all(haystack, needle):
+    """Start offsets of every (possibly overlapping) occurrence of needle."""
+    starts, i = [], haystack.find(needle)
+    while i != -1:
+        starts.append(i)
+        i = haystack.find(needle, i + 1)
+    return starts
+
+
+def qc_guide(guide, amplicon, pam, qw_center, pam_side="3prime"):
+    """Locate `guide` in `amplicon` and check it's written in the orientation
+    CRISPResso expects: 5'->3' as the protospacer, with the PAM adjacent to it
+    and not part of the string (3' of it for SpCas9, 5' for Cas12a/Cpf1).
+
+    CRISPResso searches both strands of the amplicon, so a guide legitimately
+    designed against the minus strand matches as its reverse complement -- that
+    is not an error in itself. What matters is which END of the guide carries
+    the PAM, because that is the end CRISPResso measures the quantification
+    window from. For SpCas9 (`pam_side="3prime"`):
+
+        forward match  -> PAM is the `len(pam)` bases to the RIGHT of the match
+        revcomp match  -> revcomp(PAM) is the bases immediately to the LEFT
+
+    and the two sides swap for a 5' PAM. If the PAM turns up at the opposite end
+    instead, the string is the reverse complement of the designed protospacer.
+    CRISPResso still matches it, without warning, but treats the wrong end as
+    PAM-proximal -- for a 20mer at the default window centre that puts the
+    window ~14 bp from where it belongs.
+
+    Returns the QC verdict plus the cut index CRISPResso derives from the match
+    (driven by -wc alone, so it doesn't depend on which side the PAM is on):
+        forward: start + qw_center + len(guide) - 1
+        revcomp: start + (-qw_center) - 1
+    """
+    fwd_starts = find_all(amplicon, guide)
+    rc_starts = find_all(amplicon, revcomp(guide))
+    n_matches = len(fwd_starts) + len(rc_starts)
+
+    result = {
+        "n_fwd_matches": len(fwd_starts), "n_rc_matches": len(rc_starts),
+        "strand": "", "match_start": "", "pam_seq": "", "cut_index": "",
+    }
+    if n_matches == 0:
+        return dict(result, status="NOT_IN_AMPLICON")
+    if n_matches > 1:
+        # CRISPResso would derive a cut site from every match, so the window is
+        # ambiguous: usually the guide sits in a repeat, or the amplicon is wrong
+        return dict(result, status="MULTIPLE_MATCHES")
+
+    forward = bool(fwd_starts)
+    start = (fwd_starts or rc_starts)[0]
+    end = start + len(guide)  # exclusive
+    result["strand"] = "+" if forward else "-"
+    result["match_start"] = str(start)
+    result["cut_index"] = str(
+        start + qw_center + len(guide) - 1 if forward else start + (-qw_center) - 1
+    )
+
+    left = amplicon[max(0, start - len(pam)):start]
+    right = amplicon[end:end + len(pam)]
+    # Which flank should hold the PAM if the guide is written as designed, and in
+    # which orientation: a minus-strand match reads the amplicon backwards, so it
+    # looks for revcomp(PAM), and flips which flank is the guide's 3' end.
+    on_right = forward == (pam_side == "3prime")
+    expected_seq = right if on_right else left
+    expected_code = pam if forward else revcomp_pam(pam)
+    flipped_seq = left if on_right else right
+    result["pam_seq"] = expected_seq
+
+    if matches_pam(expected_seq, expected_code):
+        return dict(result, status="OK")
+    if matches_pam(flipped_seq, revcomp_pam(expected_code)):
+        # PAM sits at the guide's other end -- the string is the revcomp of the design
+        return dict(result, status="PAM_ON_WRONG_END")
+    if len(expected_seq) < len(pam):
+        # guide butts up against the amplicon edge, so its PAM was never captured
+        return dict(result, status="PAM_OUTSIDE_AMPLICON")
+    return dict(result, status="NO_PAM")
 
 
 def write_reassigned_sam(orig_sam_path, out_sam_path, reassignments):
@@ -499,6 +607,19 @@ def main():
     ap.add_argument("--exon-bed", default=None,
                      help="optional exon BED (from gtf_to_genebed.py) for the overlapping_exons column")
     ap.add_argument("--outdir", required=True)
+    ap.add_argument("--pam", default="NGG",
+                     help="PAM expected immediately 3' of each guide, as an IUPAC code (default NGG for "
+                          "SpCas9). Used only by the guide_qc.tsv orientation check -- a guide is correctly "
+                          "oriented if this matches the bases to the right of a forward match in the "
+                          "amplicon, or its reverse complement matches those to the left of a revcomp match")
+    ap.add_argument("--pam-side", default="3prime", choices=["3prime", "5prime"],
+                     help="which end of the protospacer the PAM sits at: 3prime for SpCas9 (NGG), 5prime for "
+                          "Cas12a/Cpf1 (TTTV). Guides are written 5'->3' without the PAM either way; this only "
+                          "tells the guide_qc.tsv check which flank of the match to look in")
+    ap.add_argument("--quantification-window-center", type=int, default=-3,
+                     help="CRISPResso's -wc, mirrored here to report the cut index CRISPResso will derive "
+                          "from each guide in guide_qc.tsv (default -3 for SpCas9; Cas12a/Cpf1 uses 1). "
+                          "Reporting only -- this script does not pass it to CRISPResso")
     ap.add_argument("--max-mismatch", type=int, default=2,
                      help="edit-distance threshold below which an extra hit is reported as a high-quality off-target")
     ap.add_argument("--high-copy-threshold", type=int, default=50,
@@ -560,6 +681,7 @@ def main():
     amplicon_report_path = os.path.join(reports_dir, "amplicon_report.tsv")
     offtarget_path = os.path.join(reports_dir, "off_targets.tsv")
     crispresso_path = os.path.join(reports_dir, "crispresso_amplicons.txt")
+    guide_qc_path = os.path.join(reports_dir, "guide_qc.tsv")
     reassigned_log_path = os.path.join(reports_dir, "reassigned_primaries.tsv")
     combined_fasta_path = os.path.join(amplicons_dir, "all_amplicons.fasta")
 
@@ -568,7 +690,9 @@ def main():
     n_estimated = 0
     n_crispresso = 0
     n_reassigned = 0
+    n_guides_ok, n_guides_unmatched = 0, 0
     reassignments = {}  # (sample_id, seq_type) -> dict of SAM fields, for write_reassigned_sam()
+    guide_qc_by_sample = {}  # sample_id -> list of guide_qc.tsv rows (buffered to keep manifest order)
 
     with open(validation_path, "w") as vout, \
          open(amplicon_report_path, "w") as aout, \
@@ -890,21 +1014,31 @@ def main():
 
             # CRISPRessoPooled amplicon description file: amplicon_name, amplicon_seq,
             # guide_seq, expected_hdr_amplicon_seq, coding_seq (5 cols, no header, "NA"
-            # for anything not applicable/available). guide_seq is pulled from the
-            # reference at each guide's aligned coordinates (not the designed oligo),
-            # so it's guaranteed to be an exact substring of amplicon_seq even where
-            # bwa aln allowed a mismatch.
+            # for anything not applicable/available). guide_seq is the designed oligo
+            # from the manifest (U->T), passed through as written: CRISPResso derives
+            # the quantification window from the guide's own 3' end, so re-deriving
+            # the sequence from the reference would silently drop the orientation the
+            # design carries. Each guide is QC'd against the extracted amplicon first
+            # (reports/guide_qc.tsv); one CRISPResso can't locate is left out here
+            # rather than passed for it to warn about and ignore.
             guide_seqs = []
             for guide_type in ("guide1", "guide2", "guide3"):
-                g = per_type_position.get(guide_type)
-                if g is None:
+                guide = rna_to_dna(row[guide_type])
+                if not guide or guide == "NA":
                     continue
-                if g.chrom != ext_chrom or not (ext_start <= g.start and g.end <= ext_end):
-                    continue
-                try:
-                    guide_seqs.append(extract_fasta_seq(args.ref, fai_path, g.chrom, g.start, g.end))
-                except subprocess.CalledProcessError:
-                    pass
+                qc = qc_guide(guide, seq, args.pam, args.quantification_window_center, args.pam_side)
+                passed = qc["status"] != "NOT_IN_AMPLICON"
+                if passed:
+                    guide_seqs.append(guide)
+                else:
+                    n_guides_unmatched += 1
+                n_guides_ok += 1 if qc["status"] == "OK" else 0
+                guide_qc_by_sample.setdefault(sample_id, []).append([
+                    sample_id, declared_gene_name, declared_gene_id, guide_type, guide,
+                    str(len(guide)), qc["strand"], qc["match_start"], str(qc["n_fwd_matches"]),
+                    str(qc["n_rc_matches"]), qc["pam_seq"], qc["cut_index"],
+                    "yes" if passed else "no", qc["status"],
+                ])
             cout.write("\t".join([
                 sample_id, seq, ",".join(guide_seqs) if guide_seqs else "NA", "NA", "NA",
             ]) + "\n")
@@ -941,11 +1075,41 @@ def main():
                 fasta_name, status,
             ]) + "\n")
 
+    # Guide QC, in manifest order. Rows were buffered above as each amplicon was
+    # extracted; a guide whose amplicon never was can't be checked at all, so it
+    # gets a NO_AMPLICON row rather than being left out of the report entirely.
+    n_guides_no_amplicon = 0
+    with open(guide_qc_path, "w") as gout:
+        gout.write("\t".join([
+            "sample_id", "gene_name_declared", "gene_id_declared", "seq_type", "guide_seq",
+            "guide_length", "strand_in_amplicon", "match_start", "n_fwd_matches",
+            "n_rc_matches", "pam_seq", "cut_index", "passed_to_crispresso", "status",
+        ]) + "\n")
+        for sample_id, row in rows.items():
+            if sample_id in guide_qc_by_sample:
+                for qc_row in guide_qc_by_sample[sample_id]:
+                    gout.write("\t".join(qc_row) + "\n")
+                continue
+            for guide_type in ("guide1", "guide2", "guide3"):
+                guide = rna_to_dna(row[guide_type])
+                if not guide or guide == "NA":
+                    continue
+                n_guides_no_amplicon += 1
+                gout.write("\t".join([
+                    sample_id, row["gene_name"], row["gene_id"], guide_type, guide,
+                    str(len(guide)), "", "", "", "", "", "", "no", "NO_AMPLICON",
+                ]) + "\n")
+
     sys.stderr.write(
         "build_report: %d guide/primer hits OK, %d flagged, %d unmapped; %d amplicons extracted OK "
         "(%d estimated from a single primer + declared size); %d rows written to CRISPResso amplicons "
         "file; %d positions corrected to a gene-matching tie\n"
         % (n_ok, n_flagged, n_unmapped, n_amplicons_ok, n_estimated, n_crispresso, n_reassigned)
+    )
+    sys.stderr.write(
+        "build_report: guide QC -- %d guides correctly oriented with a %s PAM, %d not found in "
+        "their amplicon, %d with no amplicon to check against (see %s)\n"
+        % (n_guides_ok, args.pam, n_guides_unmatched, n_guides_no_amplicon, guide_qc_path)
     )
     if args.reassign_primary:
         if args.exact_sam:

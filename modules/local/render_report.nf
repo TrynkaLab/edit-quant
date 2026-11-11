@@ -14,6 +14,7 @@ process RENDER_REPORT {
         path sample_check
         path amplicon_replicates
         path amplicon_report
+        path guide_qc
         path amplicon_manifest
         path template
         val pipeline_version
@@ -30,6 +31,7 @@ process RENDER_REPORT {
         --sample_check ${sample_check} \\
         --amplicon_replicates ${amplicon_replicates} \\
         --amplicon_report ${amplicon_report} \\
+        --guide_qc ${guide_qc} \\
         --amplicon_manifest ${amplicon_manifest} \\
         --template ${template} \\
         --edit_threshold ${params.report_edit_threshold} \\
@@ -37,6 +39,9 @@ process RENDER_REPORT {
         --min_reads ${params.report_min_reads} \\
         --wt_pattern '${params.report_wt_pattern}' \\
         --plate_format ${params.report_plate_format} \\
+        --pam '${params.guide_pam}' \\
+        --pam_side ${params.guide_pam_side} \\
+        --quantification_window_center ${params.quantification_window_center} \\
         --pipeline_version '${pipeline_version}' \\
         --output edit_quant_report.html \\
         --pairs_output pair_summary.tsv

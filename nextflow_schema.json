@@ -140,6 +140,28 @@
                     "default": true,
                     "description": "Promote gene-matching tied alternates to primary; log + write corrected BAM.",
                     "fa_icon": "fas fa-sliders-h"
+                },
+                "guide_pam": {
+                    "type": "string",
+                    "default": "NGG",
+                    "description": "PAM expected adjacent to each guide, as an IUPAC code.",
+                    "help_text": "Used by the guide orientation check in reports/guide_qc.tsv and the report's Design QC tab: a guide is correctly oriented if this matches the flank on its PAM side (see guide_pam_side) where it matches its amplicon, or its reverse complement matches the opposite flank of a reverse-complement match. NGG for SpCas9; TTTV for Cas12a/Cpf1, which also needs guide_pam_side 5prime and quantification_window_center 1."
+                },
+                "guide_pam_side": {
+                    "type": "string",
+                    "default": "3prime",
+                    "enum": [
+                        "3prime",
+                        "5prime"
+                    ],
+                    "description": "Which end of the protospacer the PAM sits at.",
+                    "help_text": "3prime for SpCas9 (NGG), 5prime for Cas12a/Cpf1 (TTTV). Guides are written 5'->3' without the PAM either way; this only tells the orientation check which flank to look in."
+                },
+                "quantification_window_center": {
+                    "type": "integer",
+                    "default": -3,
+                    "description": "CRISPResso's quantification window centre (-wc), mirrored to report each guide's cut index.",
+                    "help_text": "Reporting only -- it is not passed to CRISPRessoPooled, which uses its own default. -3 for SpCas9, 1 for Cas12a/Cpf1."
                 }
             }
         },
@@ -203,7 +225,13 @@
                 "report_plate_format": {
                     "type": "string",
                     "default": "auto",
-                    "enum": ["auto", "24", "96", "384", "1536"],
+                    "enum": [
+                        "auto",
+                        "24",
+                        "96",
+                        "384",
+                        "1536"
+                    ],
                     "description": "Plate layout for the plate heatmaps; 'auto' picks the smallest standard plate that fits.",
                     "fa_icon": "fas fa-th"
                 }

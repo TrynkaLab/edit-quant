@@ -100,6 +100,9 @@ workflow {
         params.max_mismatch,
         params.high_copy_threshold,
         params.reassign_primary,
+        params.guide_pam,
+        params.guide_pam_side,
+        params.quantification_window_center,
     )
 
     // runs 0 or 1 times: reassigned_sam is only emitted when reassign_primary
@@ -149,6 +152,7 @@ workflow {
         CHECK_SAMPLES.out.sample_check,
         CHECK_SAMPLES.out.amplicon_replicates,
         build_report_result.amplicon_report,
+        build_report_result.guide_qc,
         ch_amplicon_manifest,
         file("${projectDir}/assets/report.html.j2"),
         workflow.manifest.version ?: 'unknown',

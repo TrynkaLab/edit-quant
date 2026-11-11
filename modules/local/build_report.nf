@@ -1,7 +1,7 @@
-// Wraps bin/build_report.py (unchanged): turns the two BWA alignments into
-// validation/amplicon/off-target reports, extracted amplicon FASTAs, and the
-// CRISPRessoPooled amplicons description file. See mapping_amplicons/README.md
-// for the full column/status-code documentation.
+// Wraps bin/build_report.py: turns the two BWA alignments into
+// validation/amplicon/off-target reports, the guide orientation/PAM QC table,
+// extracted amplicon FASTAs, and the CRISPRessoPooled amplicons description
+// file. See the README for the full column/status-code documentation.
 
 process BUILD_REPORT {
     tag "${amplicon_manifest.name}"
@@ -21,10 +21,14 @@ process BUILD_REPORT {
     val max_mismatch
     val high_copy_threshold
     val reassign_primary
+    val pam
+    val pam_side
+    val quantification_window_center
 
     output:
         path 'reports/validation_report.tsv', emit: validation_report
         path 'reports/amplicon_report.tsv', emit: amplicon_report
+        path 'reports/guide_qc.tsv', emit: guide_qc
         path 'reports/off_targets.tsv', emit: off_targets
         path 'reports/crispresso_amplicons.txt', emit: crispresso_amplicons
         path 'reports/reassigned_primaries.tsv', emit: reassigned_log
@@ -47,6 +51,9 @@ process BUILD_REPORT {
         --outdir . \\
         --max-mismatch ${max_mismatch} \\
         --high-copy-threshold ${high_copy_threshold} \\
+        --pam '${pam}' \\
+        --pam-side ${pam_side} \\
+        --quantification-window-center ${quantification_window_center} \\
         ${exon_arg} \\
         ${reassign_arg}
     """

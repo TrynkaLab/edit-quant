@@ -6,9 +6,11 @@ Jinja2 template (assets/report.html.j2) with Plotly figures embedded as divs and
 plotly.js injected once, so the report is a single file that works offline.
 
   Tab 1 Summary        - run-level counts, edited and WT samples split, read depth histogram
-  Tab 2 QC             - per-sample success/success_wt/fail/not-tested counts and the full pair table
-  Tab 3 Plates         - per design plate heatmaps of edit % for each sample
-  Tab 4 Amplicon/donor - amplicon x donor heatmap of edit %
+  Tab 2 Design QC      - amplicon extraction and guide orientation/PAM checks, i.e. whether
+                         CRISPResso was handed a sane amplicon and guide in the first place
+  Tab 3 QC             - per-sample success/success_wt/fail/not-tested counts and the full pair table
+  Tab 4 Plates         - per design plate heatmaps of edit % for each sample
+  Tab 5 Amplicon/donor - amplicon x donor heatmap of edit %
 
 A "pair" is one sample x one (replicate-merged) amplicon in that sample's project panel:
 
@@ -47,6 +49,12 @@ log.setLevel(logging.INFO)
 
 STATUS_ORDER = ["success", "success_wt", "fail", "not_tested"]
 STATUS_COLORS = {"success": "#0e9e86", "success_wt": "#3d85c6", "fail": "#e07a5f", "not_tested": "#9e9e9e"}
+
+# Design-QC statuses (build_report.py) that mean "usable as designed". Everything
+# else is shown as flagged, so a status added upstream shows up rather than being
+# silently counted as a pass.
+AMPLICON_PASS = {"OK"}
+GUIDE_PASS = {"OK"}
 
 # rows x cols for each supported plate format (as tglow.qc.plate_layout)
 PLATE_FORMATS = {24: (4, 6), 96: (8, 12), 384: (16, 24), 1536: (32, 48)}
@@ -97,6 +105,22 @@ def load_amplicons(amplicon_manifest_path, replicates_path, amplicon_report_path
     wells = wells.merge(extraction, on="amplicon_name", how="left")
     wells["extracted"] = wells["crispresso_amplicon_name"].notna()
     return wells
+
+
+def load_design(amplicon_report_path, guide_qc_path, wells):
+    """The two BUILD_REPORT design-QC tables, each annotated with the well they
+    came from (project/plate/well), which the TSVs identify only by sample_id."""
+    well_cols = ["amplicon_name", "project_name", "plate_name", "well"]
+    keys = wells[well_cols].drop_duplicates("amplicon_name")
+
+    amplicons = pd.read_csv(amplicon_report_path, sep="\t", dtype=str, keep_default_na=False)
+    guides = pd.read_csv(guide_qc_path, sep="\t", dtype=str, keep_default_na=False)
+    for table in (amplicons, guides):
+        table["status"] = table["status"].replace("", "UNKNOWN")
+    return (
+        amplicons.merge(keys, left_on="sample_id", right_on="amplicon_name", how="left"),
+        guides.merge(keys, left_on="sample_id", right_on="amplicon_name", how="left"),
+    )
 
 
 def load_quantification(crispresso_dir):
@@ -232,7 +256,62 @@ def build_summary_tab(pairs, samples, wells, min_reads):
 
 
 # ---------------------------------------------------------------------------------- #
-#                                     Tab 2: QC
+#                                  Tab 2: Design QC
+# ---------------------------------------------------------------------------------- #
+def status_counts(table, pass_statuses):
+    """[{status, n, pass}] ordered by count, passing statuses first."""
+    counts = table["status"].value_counts()
+    return sorted(
+        ({"status": status, "n": int(n), "pass": status in pass_statuses} for status, n in counts.items()),
+        key=lambda c: (not c["pass"], -c["n"], c["status"]),
+    )
+
+
+def build_design_tab(amplicons, guides, pam, pam_side, qw_center):
+    """Did each design well give CRISPResso a usable amplicon, and a guide it can
+    actually find in that amplicon and orient correctly? Both are upstream of any
+    editing number: a guide CRISPResso can't place leaves the quantification
+    window spanning the whole amplicon, and one placed the wrong way round puts
+    it at the far end of the protospacer, so the edit % below is measured in the
+    wrong place rather than being obviously absent."""
+    n_amplicons_pass = int(amplicons["status"].isin(AMPLICON_PASS).sum())
+    n_guides_pass = int(guides["status"].isin(GUIDE_PASS).sum())
+    n_guides_passed_on = int((guides["passed_to_crispresso"] == "yes").sum())
+
+    amplicon_cols = ["sample_id", "project_name", "plate_name", "well", "gene_name_declared",
+                     "chrom", "amplicon_start", "amplicon_end", "amplicon_length",
+                     "declared_amplicon_size", "length_diff", "orientation_ok", "status"]
+    guide_cols = ["sample_id", "project_name", "plate_name", "well", "gene_name_declared",
+                  "seq_type", "guide_seq", "strand_in_amplicon", "match_start", "n_fwd_matches",
+                  "n_rc_matches", "pam_seq", "cut_index", "passed_to_crispresso", "status"]
+
+    return {
+        "pam": pam,
+        "pam_side": "3'" if pam_side == "3prime" else "5'",
+        "qw_center": qw_center,
+        "amplicons": {
+            "n_total": len(amplicons),
+            "n_pass": n_amplicons_pass,
+            "n_flagged": len(amplicons) - n_amplicons_pass,
+            "counts": status_counts(amplicons, AMPLICON_PASS),
+            "pass_statuses": sorted(AMPLICON_PASS),
+            "rows": amplicons.reindex(columns=amplicon_cols).fillna("").to_dict("records"),
+        },
+        "guides": {
+            "n_total": len(guides),
+            "n_pass": n_guides_pass,
+            "n_flagged": len(guides) - n_guides_pass,
+            "n_passed_on": n_guides_passed_on,
+            "n_dropped": len(guides) - n_guides_passed_on,
+            "counts": status_counts(guides, GUIDE_PASS),
+            "pass_statuses": sorted(GUIDE_PASS),
+            "rows": guides.reindex(columns=guide_cols).fillna("").to_dict("records"),
+        },
+    }
+
+
+# ---------------------------------------------------------------------------------- #
+#                                     Tab 3: QC
 # ---------------------------------------------------------------------------------- #
 def build_status_barplot(pairs, samples):
     order = samples.loc[samples["status"] == "OK", "sample"].tolist()
@@ -282,7 +361,7 @@ def build_qc_tab(pairs, samples):
 
 
 # ---------------------------------------------------------------------------------- #
-#                               Tab 3: Plate heatmaps
+#                               Tab 4: Plate heatmaps
 # ---------------------------------------------------------------------------------- #
 def well_to_index(well):
     match = re.match(r"^([A-Za-z]+)0*([0-9]+)$", well.strip())
@@ -389,7 +468,7 @@ def build_plate_tab(pairs, samples, wells, plate_format_override):
 
 
 # ---------------------------------------------------------------------------------- #
-#                           Tab 4: Amplicon x donor heatmap
+#                           Tab 5: Amplicon x donor heatmap
 # ---------------------------------------------------------------------------------- #
 def build_donor_heatmap(project_pairs, project):
     tested = project_pairs.assign(
@@ -443,6 +522,7 @@ def build_donor_tab(pairs):
 def build_report(args):
     samples = load_samples(args.sample_check, args.wt_pattern)
     wells = load_amplicons(args.amplicon_manifest, args.amplicon_replicates, args.amplicon_report)
+    design_amplicons, design_guides = load_design(args.amplicon_report, args.guide_qc, wells)
     quant = load_quantification(args.crispresso_dir)
     pairs = build_pairs(samples, wells, quant, args.edit_threshold, args.wt_max_edit, args.min_reads)
 
@@ -457,6 +537,7 @@ def build_report(args):
             "min_reads": args.min_reads, "wt_pattern": args.wt_pattern,
         },
         "summary": build_summary_tab(pairs, samples, wells, args.min_reads),
+        "design": build_design_tab(design_amplicons, design_guides, args.pam, args.pam_side, args.quantification_window_center),
         "qc": build_qc_tab(pairs, samples),
         "plates": build_plate_tab(pairs, samples, wells, args.plate_format),
         "donors": build_donor_tab(pairs),
@@ -478,12 +559,18 @@ if __name__ == "__main__":
     parser.add_argument("--sample_check", required=True, help="reports/sample_check.tsv from CHECK_SAMPLES")
     parser.add_argument("--amplicon_replicates", required=True, help="reports/amplicon_replicates.tsv from CHECK_SAMPLES")
     parser.add_argument("--amplicon_report", required=True, help="reports/amplicon_report.tsv from BUILD_REPORT")
+    parser.add_argument("--guide_qc", required=True, help="reports/guide_qc.tsv from BUILD_REPORT")
     parser.add_argument("--amplicon_manifest", required=True, help="Amplicon design manifest")
     parser.add_argument("--template", required=True, help="Jinja2 report template (assets/report.html.j2)")
     parser.add_argument("--edit_threshold", type=float, default=50, help="Modified%% at or above which a pair counts as a successful edit")
     parser.add_argument("--wt_max_edit", type=float, default=10, help="Modified%% at or below which a tested WT pair counts as success_wt (no editing)")
     parser.add_argument("--min_reads", type=int, default=100, help="Min aligned reads for a pair to count as tested")
     parser.add_argument("--wt_pattern", default="(^|_)WT$", help="Regex matched against donor (or sample if donor is 'none') to flag WT samples")
+    parser.add_argument("--pam", default="NGG", help="PAM used for the guide orientation check (shown in the Design QC tab)")
+    parser.add_argument("--pam_side", default="3prime", choices=["3prime", "5prime"],
+                        help="Which end of the protospacer the PAM sits at (shown in the Design QC tab)")
+    parser.add_argument("--quantification_window_center", type=int, default=-3,
+                        help="CRISPResso -wc used for the reported cut index (shown in the Design QC tab)")
     parser.add_argument("--plate_format", default="auto", help="Plate format for heatmaps: auto, 24, 96, 384 or 1536")
     parser.add_argument("--pipeline_version", default="unknown", help="Shown in the report header")
     parser.add_argument("--output", required=True, help="Output HTML path")
