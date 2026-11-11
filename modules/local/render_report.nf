@@ -18,6 +18,7 @@ process RENDER_REPORT {
         path guide_qc
         path amplicon_manifest
         path template
+        path viewer_assets
         val pipeline_version
 
     output:
@@ -26,13 +27,16 @@ process RENDER_REPORT {
 
     script:
     // viewer/ is empty when the viewer is disabled or no sample produced a payload;
-    // render_report.py then simply omits the tab
+    // render_report.py then simply omits the tab.
+    // viewer_assets stages amplicon_viewer.css/.body.html/.js into the task directory:
+    // the template is staged on its own, so its directory is not the assets directory.
     """
     export MPLCONFIGDIR=\$PWD/.mplconfig
     mkdir -p viewer
     render_report.py \\
         --crispresso_dir crispresso \\
         --viewer_dir viewer \\
+        --viewer_assets . \\
         --sample_check ${sample_check} \\
         --amplicon_replicates ${amplicon_replicates} \\
         --amplicon_report ${amplicon_report} \\

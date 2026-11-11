@@ -181,7 +181,17 @@ def build_viewer_tab(viewer_dir, assets_dir):
         return {"available": False}
 
     def asset(name):
-        with open(os.path.join(assets_dir, name), encoding="utf-8") as fh:
+        path = os.path.join(assets_dir, name)
+        if not os.path.exists(path):
+            # Under Nextflow the template is staged into the task directory, so its
+            # own directory is NOT the assets directory -- the viewer assets have to
+            # be staged too and pointed at with --viewer_assets.
+            raise SystemExit(
+                f"viewer asset '{name}' not found in {assets_dir!r}. Pass --viewer_assets "
+                f"with the directory holding amplicon_viewer.css/.body.html/.js, or run "
+                f"with --viewer_dir omitted to build the report without the amplicon tab."
+            )
+        with open(path, encoding="utf-8") as fh:
             return fh.read()
 
     return {
@@ -608,7 +618,10 @@ def build_report(args):
         "qc": build_qc_tab(pairs, samples),
         "plates": build_plate_tab(pairs, samples, wells, args.plate_format),
         "donors": build_donor_tab(pairs),
-        "viewer": build_viewer_tab(args.viewer_dir, os.path.dirname(os.path.abspath(args.template))),
+        "viewer": build_viewer_tab(
+            args.viewer_dir,
+            args.viewer_assets or os.path.dirname(os.path.abspath(args.template)),
+        ),
     }
 
     with open(args.template) as fh:
@@ -626,6 +639,9 @@ if __name__ == "__main__":
     parser.add_argument("--crispresso_dir", required=True, help="Dir holding the CRISPRessoPooled_on_<sample> result dirs")
     parser.add_argument("--viewer_dir", help="Dir of per-sample *.viewer.json.gz from PACK_VIEWER_DATA; "
                                              "the amplicon tab is omitted when empty or absent")
+    parser.add_argument("--viewer_assets", help="Dir holding amplicon_viewer.css/.body.html/.js "
+                                                "(default: alongside --template, which only holds under "
+                                                "a direct run -- Nextflow stages the template on its own)")
     parser.add_argument("--sample_check", required=True, help="reports/sample_check.tsv from CHECK_SAMPLES")
     parser.add_argument("--amplicon_replicates", required=True, help="reports/amplicon_replicates.tsv from CHECK_SAMPLES")
     parser.add_argument("--amplicon_report", required=True, help="reports/amplicon_report.tsv from BUILD_REPORT")

@@ -182,6 +182,13 @@ workflow {
         build_report_result.guide_qc,
         ch_amplicon_manifest,
         file("${projectDir}/assets/report.html.j2"),
+        // the viewer tab inlines these three; they share assets/ with
+        // bin/build_amplicon_viewer.py so the standalone build can't drift
+        [
+            file("${projectDir}/assets/amplicon_viewer.css"),
+            file("${projectDir}/assets/amplicon_viewer.body.html"),
+            file("${projectDir}/assets/amplicon_viewer.js"),
+        ],
         workflow.manifest.version ?: 'unknown',
     )
 }
