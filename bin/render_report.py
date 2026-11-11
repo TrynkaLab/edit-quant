@@ -28,7 +28,10 @@ Also writes the pair table as TSV (the machine-readable companion to the report)
 """
 
 import argparse
+import base64
 import glob
+import gzip
+import json
 import logging
 import math
 import os
@@ -131,6 +134,66 @@ def load_quantification(crispresso_dir):
         df = pd.read_csv(path, sep="\t")
         quant[slug] = df.set_index("Name")[["Modified%", "Reads_total", "Reads_aligned"]]
     return quant
+
+
+def load_viewer_data(viewer_dir):
+    """Merge the per-sample PACK_VIEWER_DATA payloads into one viewer payload.
+
+    Each sample was packed independently, so its amplicon offsets are relative to its
+    own buffer; concatenating the buffers means rebasing them. Re-gzipping the whole
+    thing once compresses better than keeping 30 separately-compressed blobs.
+    """
+    paths = sorted(glob.glob(os.path.join(viewer_dir, "*.viewer.json.gz")))
+    if not paths:
+        return None
+    amplicons, blob, series = [], bytearray(), None
+    for path in paths:
+        with gzip.open(path, "rt", encoding="utf-8") as fh:
+            payload = json.load(fh)
+        buf = gzip.decompress(base64.b64decode(payload["blob"]))
+        base = len(blob)
+        for rec in payload["amplicons"]:
+            rec["off"] += base
+            amplicons.append(rec)
+        blob += buf
+        series = series or payload.get("series")
+    if not amplicons:
+        return None
+    log.info("amplicon viewer: %d amplicons from %d sample(s), %d KB packed",
+             len(amplicons), len(paths), len(blob) / 1024)
+    return {
+        "meta": {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"), "series": series},
+        "blob": base64.b64encode(gzip.compress(bytes(blob), 9)).decode("ascii"),
+        "amplicons": amplicons,
+    }
+
+
+def build_viewer_tab(viewer_dir, assets_dir):
+    """Viewer tab context: the merged payload plus the shared css/markup/js assets.
+
+    The same three assets drive bin/build_amplicon_viewer.py's standalone page, so the
+    report tab and the standalone build cannot drift.
+    """
+    if not viewer_dir:
+        return {"available": False}
+    data = load_viewer_data(viewer_dir)
+    if data is None:
+        return {"available": False}
+
+    def asset(name):
+        with open(os.path.join(assets_dir, name), encoding="utf-8") as fh:
+            return fh.read()
+
+    return {
+        "available": True,
+        "n_amplicons": len(data["amplicons"]),
+        "n_samples": len({a["sample"] for a in data["amplicons"]}),
+        "css": asset("amplicon_viewer.css"),
+        "body": asset("amplicon_viewer.body.html"),
+        "js": asset("amplicon_viewer.js"),
+        # json.dumps leaves '<' alone, which would end the inline <script> early
+        "json": json.dumps(data, separators=(",", ":")).replace("</", "<\\/"),
+    }
 
 
 def build_pairs(samples, wells, quant, edit_threshold, wt_max_edit, min_reads):
@@ -545,6 +608,7 @@ def build_report(args):
         "qc": build_qc_tab(pairs, samples),
         "plates": build_plate_tab(pairs, samples, wells, args.plate_format),
         "donors": build_donor_tab(pairs),
+        "viewer": build_viewer_tab(args.viewer_dir, os.path.dirname(os.path.abspath(args.template))),
     }
 
     with open(args.template) as fh:
@@ -560,6 +624,8 @@ def build_report(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Render the edit-quant summary report HTML page.")
     parser.add_argument("--crispresso_dir", required=True, help="Dir holding the CRISPRessoPooled_on_<sample> result dirs")
+    parser.add_argument("--viewer_dir", help="Dir of per-sample *.viewer.json.gz from PACK_VIEWER_DATA; "
+                                             "the amplicon tab is omitted when empty or absent")
     parser.add_argument("--sample_check", required=True, help="reports/sample_check.tsv from CHECK_SAMPLES")
     parser.add_argument("--amplicon_replicates", required=True, help="reports/amplicon_replicates.tsv from CHECK_SAMPLES")
     parser.add_argument("--amplicon_report", required=True, help="reports/amplicon_report.tsv from BUILD_REPORT")

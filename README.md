@@ -85,6 +85,8 @@ doesn't apply. `--skip_checks` turns these checks off.
 | `crispresso_suppress_plots` | no | default `true` — pass `--suppress_plots` to CRISPRessoPooled. A large speed-up on big panels; this pipeline's report is built from `SAMPLES_QUANTIFICATION_SUMMARY.txt`, not CRISPResso's plots, so nothing in it is lost. CRISPResso's own HTML report is gated by a separate flag and is still written |
 | `crispresso_skip_failed` | no | default `true` — pass `--skip_failed` to CRISPRessoPooled, so an amplicon that errors is dropped and the rest of the sample's panel still runs. Skipped amplicons show up as `not_tested` (`missing_from_output`) in the report |
 | `crispresso_min_reads_to_use_region` | no | default `100` — CRISPRessoPooled skips amplicons with fewer assigned reads (CRISPResso's own default, 1000, left ~1/3 of amplicons unanalysed); keep in line with `report_min_reads` |
+| `amplicon_viewer` | no | default `true` — embed the Amplicons tab in the HTML report: per-base read composition against the reference, with guides, cut sites and the quantification window drawn underneath. Data is packed once per sample by `PACK_VIEWER_DATA`, adding roughly 1.8 KB per amplicon to the report |
+| `amplicon_viewer_min_reads` | no | default `0` — skip amplicons below this aligned-read count in the viewer tab only; the QC tab and `pair_summary.tsv` always report every amplicon |
 | `report_edit_threshold` | no | default `50` — edit % at or above which a tested pair is a successful edit |
 | `report_wt_max_edit` | no | default `10` — edit % at or below which a tested WT pair is `success_wt` (no editing); above it the pair fails |
 | `report_min_reads` | no | default `100` — min aligned reads for a pair to count as tested |

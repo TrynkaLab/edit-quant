@@ -1,0 +1,49 @@
+/* Amplicon viewer. Every rule is scoped to .amplicon-viewer (or the #av- ids) so the
+   block can be dropped into report.html.j2 without touching the report's own styles;
+   #av-tip is the one exception, since it is position:fixed at the page level. */
+
+.amplicon-viewer { --av-accent: var(--tglow-accent, #0e9e86); }
+
+.amplicon-viewer .controls { display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap; margin-bottom: 1rem; }
+.amplicon-viewer .ctl { display: flex; flex-direction: column; gap: 0.2rem; }
+.amplicon-viewer .ctl label { font-size: 0.72rem; opacity: 0.7; }
+.amplicon-viewer select,
+.amplicon-viewer input[type=search] { padding: 0.35rem 0.5rem; font-size: 0.9rem; border: 1px solid #8886; border-radius: 6px; background: Canvas; color: CanvasText; margin: 0; }
+.amplicon-viewer select.tall { min-width: 330px; }
+.amplicon-viewer input[type=range] { width: 150px; }
+.amplicon-viewer .seg { display: flex; border: 1px solid #8886; border-radius: 6px; overflow: hidden; }
+.amplicon-viewer .seg button { padding: 0.35rem 0.7rem; border: 0; background: transparent; cursor: pointer; font-size: 0.85rem; color: CanvasText; }
+.amplicon-viewer .seg button.active { background: color-mix(in srgb, var(--av-accent) 25%, transparent); }
+
+.amplicon-viewer .av-metrics { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-bottom: 0.9rem; }
+.amplicon-viewer .av-metric { background: #8881; border-radius: 8px; padding: 0.5rem 0.9rem; min-width: 96px; }
+.amplicon-viewer .av-metric .value { font-size: 1.05rem; font-weight: 600; }
+.amplicon-viewer .av-metric .label { font-size: 0.68rem; opacity: 0.7; margin-top: 0.1rem; }
+.amplicon-viewer .av-metric.warn { background: #e07a5f22; border: 1px solid #e07a5f88; }
+.amplicon-viewer .av-metric.warn .value { color: #c4553a; }
+
+.amplicon-viewer .banner { border-radius: 8px; padding: 0.6rem 0.9rem; margin-bottom: 0.9rem; font-size: 0.85rem; display: none; }
+.amplicon-viewer .banner.show { display: block; }
+.amplicon-viewer .banner.warn { background: #e07a5f1f; border: 1px solid #e07a5f66; }
+
+.amplicon-viewer .viewer { border: 1px solid #8884; border-radius: 10px; overflow: hidden; }
+.amplicon-viewer .viewer-body { display: flex; align-items: flex-start; }
+.amplicon-viewer .gutter { flex: 0 0 104px; border-right: 1px solid #8884; background: #8880; }
+.amplicon-viewer .gutter div { font-size: 0.68rem; opacity: 0.75; padding: 0 0.5rem; display: flex; align-items: center; border-bottom: 1px solid #8882; }
+.amplicon-viewer .plot-wrap { position: relative; flex: 1; min-width: 0; }
+.amplicon-viewer canvas { position: absolute; top: 0; left: 0; width: 100%; }
+.amplicon-viewer .scroller { position: relative; z-index: 2; overflow-x: auto; overflow-y: hidden; }
+.amplicon-viewer .scroller .spacer { height: 1px; }
+
+.amplicon-viewer .legend { display: flex; flex-wrap: wrap; gap: 0.8rem; padding: 0.55rem 0.9rem; border-top: 1px solid #8884; font-size: 0.73rem; align-items: center; }
+.amplicon-viewer .legend span.sw,
+#av-tip span.sw { display: inline-block; width: 11px; height: 11px; border-radius: 2px; margin-right: 0.3rem; vertical-align: -1px; }
+.amplicon-viewer .note { opacity: 0.7; font-size: 0.8rem; margin-top: 0.8rem; }
+
+#av-tip { position: fixed; z-index: 500; pointer-events: none; display: none; background: Canvas; color: CanvasText;
+          border: 1px solid #8886; border-radius: 7px; padding: 0.45rem 0.6rem; font-size: 0.74rem; line-height: 1.45;
+          box-shadow: 0 4px 14px #0003; min-width: 150px; }
+#av-tip b { font-size: 0.8rem; }
+#av-tip table { border-collapse: collapse; margin-top: 0.25rem; }
+#av-tip td { padding: 0 0.3rem 0 0; }
+#av-tip td.n { text-align: right; font-variant-numeric: tabular-nums; }

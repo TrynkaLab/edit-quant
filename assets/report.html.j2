@@ -68,6 +68,9 @@
   .note { opacity: 0.7; font-size: 0.85rem; }
   h2 { margin-top: 0; }
   h3 { margin-top: 1.5rem; }
+{% if viewer.available %}
+{{ viewer.css }}
+{% endif %}
 </style>
 </head>
 <body>
@@ -79,6 +82,9 @@
     <button class="tab-btn active" data-tab="summary">Summary</button>
     <button class="tab-btn" data-tab="design">Design QC</button>
     <button class="tab-btn" data-tab="qc">QC</button>
+  {% if viewer.available %}
+    <button class="tab-btn" data-tab="amplicons">Amplicons</button>
+  {% endif %}
   {% if plates.available %}
     <button class="tab-btn" data-tab="plates">Plates</button>
   {% endif %}
@@ -300,6 +306,18 @@
 
 <!-- ==================== Tab 4: Plates ==================== -->
 {% if plates.available %}
+{% if viewer.available %}
+<section id="tab-amplicons" class="tab-content">
+  <h2>Amplicons</h2>
+  <p class="note">
+    Per-base composition for {{ viewer.n_amplicons }} amplicon(s) across {{ viewer.n_samples }} sample(s).
+    Pick a sample and amplicon to see the read pile-up against the reference, with the guides and
+    cut sites drawn underneath.
+  </p>
+{{ viewer.body }}
+</section>
+{% endif %}
+
 <section id="tab-plates" class="tab-content">
   <h2>Plates</h2>
   <p class="note">Edit % per design well, one heatmap per sample. Grey wells were designed but not tested; replicate wells show the shared (merged) amplicon's value.</p>
@@ -353,6 +371,8 @@
       btn.classList.add('active');
       document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
       window.dispatchEvent(new Event('resize'));
+      // the viewer canvas measures 0 wide while its tab is display:none
+      if (btn.dataset.tab === 'amplicons' && window.ampliconViewer) window.ampliconViewer.onShow();
     });
   });
 
@@ -438,6 +458,18 @@
     });
   });
 </script>
+
+{% if viewer.available %}
+<script id="av-data" type="application/json">{{ viewer.json }}</script>
+<script>
+{{ viewer.js }}
+</script>
+<script>
+  window.addEventListener('DOMContentLoaded', () => {
+    window.ampliconViewer.init(JSON.parse(document.getElementById('av-data').textContent));
+  });
+</script>
+{% endif %}
 
 </body>
 </html>

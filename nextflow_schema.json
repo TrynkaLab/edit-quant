@@ -202,6 +202,19 @@
                     "default": true,
                     "description": "Pass --suppress_plots to CRISPRessoPooled, skipping its per-amplicon plots.",
                     "help_text": "A large speed-up on big panels. This pipeline's own report is built from SAMPLES_QUANTIFICATION_SUMMARY.txt, not from CRISPResso's plots, so nothing in it is lost. CRISPResso's HTML report is gated by a separate flag and is still written."
+                },
+                "amplicon_viewer": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Embed the per-base amplicon viewer tab in the HTML report.",
+                    "help_text": "Packs each sample's CRISPResso per-amplicon tables (PACK_VIEWER_DATA) and embeds them in the report, adding roughly 1.8 KB per amplicon to the HTML. Set false to omit the tab."
+                },
+                "amplicon_viewer_min_reads": {
+                    "type": "integer",
+                    "default": 0,
+                    "minimum": 0,
+                    "description": "Skip amplicons below this aligned-read count in the amplicon viewer.",
+                    "help_text": "Only affects the viewer tab; the QC tab and pair_summary.tsv always report every amplicon."
                 }
             }
         },

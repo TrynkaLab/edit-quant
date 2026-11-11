@@ -11,6 +11,7 @@ process RENDER_REPORT {
 
     input:
         path crispresso_results, stageAs: "crispresso/*"
+        path viewer_data, stageAs: "viewer/*"
         path sample_check
         path amplicon_replicates
         path amplicon_report
@@ -24,10 +25,14 @@ process RENDER_REPORT {
         path 'pair_summary.tsv', emit: pairs
 
     script:
+    // viewer/ is empty when the viewer is disabled or no sample produced a payload;
+    // render_report.py then simply omits the tab
     """
     export MPLCONFIGDIR=\$PWD/.mplconfig
+    mkdir -p viewer
     render_report.py \\
         --crispresso_dir crispresso \\
+        --viewer_dir viewer \\
         --sample_check ${sample_check} \\
         --amplicon_replicates ${amplicon_replicates} \\
         --amplicon_report ${amplicon_report} \\

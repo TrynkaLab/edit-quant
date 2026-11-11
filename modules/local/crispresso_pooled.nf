@@ -15,7 +15,7 @@ process CRISPRESSO_POOLED {
         val suppress_plots
 
     output:
-        path "CRISPRessoPooled_on_${sample}", emit: results
+        tuple val(sample), path("CRISPRessoPooled_on_${sample}"), emit: results
         path "*.html", optional: true, emit: html_reports
 
     script:

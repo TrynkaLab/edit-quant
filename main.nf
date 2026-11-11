@@ -18,6 +18,7 @@ include { BUILD_REPORT }                     from './modules/local/build_report'
 include { REASSIGNED_BAM }                   from './modules/local/reassigned_bam'
 include { CHECK_SAMPLES }                    from './modules/local/check_samples'
 include { CRISPRESSO_POOLED }                from './modules/local/crispresso_pooled'
+include { PACK_VIEWER_DATA }                 from './modules/local/pack_viewer_data'
 include { RENDER_REPORT }                    from './modules/local/render_report'
 
 workflow {
@@ -154,9 +155,27 @@ workflow {
         params.crispresso_suppress_plots,
     )
 
+    // results is tuple(sample, CRISPRessoPooled_on_<sample>): the report wants just the
+    // directories, the viewer packer wants both
+    ch_crispresso = CRISPRESSO_POOLED.out.results
+
+    // --- per-sample viewer payloads, packed in parallel so RENDER_REPORT stages one
+    //     small file per sample instead of every per-amplicon table ---
+    if (asBool(params.amplicon_viewer)) {
+        PACK_VIEWER_DATA(
+            ch_crispresso,
+            params.amplicon_viewer_min_reads,
+            params.quantification_window_center,
+        )
+        ch_viewer_data = PACK_VIEWER_DATA.out.data.collect().ifEmpty([])
+    } else {
+        ch_viewer_data = channel.value([])
+    }
+
     // --- summary report over all samples ---
     RENDER_REPORT(
-        CRISPRESSO_POOLED.out.results.collect().ifEmpty([]),
+        ch_crispresso.map { _sample, results -> results }.collect().ifEmpty([]),
+        ch_viewer_data,
         CHECK_SAMPLES.out.sample_check,
         CHECK_SAMPLES.out.amplicon_replicates,
         build_report_result.amplicon_report,

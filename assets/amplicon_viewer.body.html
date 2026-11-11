@@ -1,0 +1,54 @@
+<div class="amplicon-viewer">
+  <div class="controls">
+    <div class="ctl">
+      <label for="av-sel-sample">Sample</label>
+      <select id="av-sel-sample"></select>
+    </div>
+    <div class="ctl">
+      <label for="av-filter">Filter amplicons</label>
+      <input type="search" id="av-filter" placeholder="gene or well&hellip;" size="14">
+    </div>
+    <div class="ctl">
+      <label for="av-sel-amp">Amplicon</label>
+      <select id="av-sel-amp" class="tall"></select>
+    </div>
+    <div class="ctl">
+      <label for="av-zoom">Zoom (<span id="av-zoom-val">3</span> px/base)</label>
+      <input type="range" id="av-zoom" min="1" max="18" step="0.25" value="3">
+    </div>
+    <div class="ctl">
+      <label>Colour</label>
+      <div class="seg" id="av-mode">
+        <button data-mode="ref" class="active">Ref vs variant</button>
+        <button data-mode="base">Base</button>
+      </div>
+    </div>
+    <div class="ctl">
+      <label>&nbsp;</label>
+      <div class="seg"><button id="av-btn-cut">Jump to cut sites</button></div>
+    </div>
+  </div>
+
+  <div class="av-metrics" id="av-metrics"></div>
+  <div class="banner warn" id="av-banner"></div>
+
+  <div class="viewer">
+    <div class="viewer-body">
+      <div class="gutter" id="av-gutter"></div>
+      <div class="plot-wrap" id="av-wrap">
+        <canvas id="av-cv"></canvas>
+        <div class="scroller" id="av-scroller"><div class="spacer" id="av-spacer"></div></div>
+      </div>
+    </div>
+    <div class="legend" id="av-legend"></div>
+  </div>
+
+  <p class="note">
+    Percentages are quantised to 1/255 (&plusmn;0.2%) for compactness &mdash; this view is for reading shapes and
+    locating signal, not for reporting figures. Authoritative per-amplicon numbers stay in the QC tab and
+    <code>pair_summary.tsv</code>. In a multi-guide design a large deletion between two cut sites is the expected
+    outcome, so the bracket under the base track is green when the block&rsquo;s ends sit on cut sites and amber
+    when they do not.
+  </p>
+</div>
+<div id="av-tip"></div>

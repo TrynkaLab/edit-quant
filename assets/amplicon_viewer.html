@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>edit-quant amplicon viewer</title>
+<style>
+  /* Page chrome for the standalone build only. Everything that styles the viewer
+     itself lives in amplicon_viewer.css, shared with the report. */
+  :root { color-scheme: light dark; --tglow-accent: #0e9e86; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, Segoe UI, Helvetica, Arial, sans-serif; margin: 0; padding: 0; }
+  header { background: var(--tglow-accent); color: #fff; }
+  header .inner { max-width: 1500px; margin: 0 auto; padding: 1rem 2rem; display: flex; align-items: baseline; gap: 0.75rem; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 1.3rem; }
+  header .run-date { margin: 0; font-size: 0.85rem; opacity: 0.85; }
+  main { max-width: 1500px; margin: 0 auto; padding: 1.25rem 2rem 3rem; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; }
+/*__VIEWER_CSS__*/
+</style>
+</head>
+<body>
+
+<header><div class="inner">
+  <h1>edit-quant amplicon viewer</h1>
+  <p class="run-date" id="av-hdr-sub">prototype</p>
+</div></header>
+
+<main>
+/*__VIEWER_BODY__*/
+</main>
+
+<script id="viewer-data" type="application/json">/*__VIEWER_DATA__*/</script>
+<script>
+/*__VIEWER_JS__*/
+</script>
+<script>
+window.addEventListener("DOMContentLoaded", async () => {
+  await window.ampliconViewer.init(JSON.parse(document.getElementById("viewer-data").textContent));
+  window.ampliconViewer.onShow();
+});
+</script>
+</body>
+</html>
