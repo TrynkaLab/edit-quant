@@ -80,7 +80,9 @@ doesn't apply. `--skip_checks` turns these checks off.
 | `guide_pam` | no | default `NGG` — PAM adjacent to each guide (IUPAC) for the `guide_qc.tsv` orientation check; `TTTV` for Cas12a/Cpf1 |
 | `guide_pam_side` | no | default `3prime` — which end of the protospacer that PAM sits at; `5prime` for Cas12a/Cpf1 |
 | `quantification_window_center` | no | default `-3` — CRISPResso's `-wc`, mirrored to report each guide's cut index; `1` for Cas12a/Cpf1. Reporting only, not passed to CRISPResso |
-| `crispresso_n_processes` | no | default `1` |
+| `crispresso_n_processes` | no | default `4` — cores per CRISPRessoPooled task. Also sets the process's `cpus`, and is passed to CRISPResso as `--n_processes ${task.cpus}` so the scheduler request and the flag can't drift |
+| `crispresso_memory` | no | default `16.GB` — memory per CRISPRessoPooled task, multiplied by the attempt number on retry. CRISPResso's memory use rises with `crispresso_n_processes`, so raise the two together |
+| `crispresso_suppress_plots` | no | default `true` — pass `--suppress_plots` to CRISPRessoPooled. A large speed-up on big panels; this pipeline's report is built from `SAMPLES_QUANTIFICATION_SUMMARY.txt`, not CRISPResso's plots, so nothing in it is lost. CRISPResso's own HTML report is gated by a separate flag and is still written |
 | `crispresso_skip_failed` | no | default `true` — pass `--skip_failed` to CRISPRessoPooled, so an amplicon that errors is dropped and the rest of the sample's panel still runs. Skipped amplicons show up as `not_tested` (`missing_from_output`) in the report |
 | `crispresso_min_reads_to_use_region` | no | default `100` — CRISPRessoPooled skips amplicons with fewer assigned reads (CRISPResso's own default, 1000, left ~1/3 of amplicons unanalysed); keep in line with `report_min_reads` |
 | `report_edit_threshold` | no | default `50` — edit % at or above which a tested pair is a successful edit |

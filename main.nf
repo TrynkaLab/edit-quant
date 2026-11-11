@@ -144,11 +144,14 @@ workflow {
         .map { _amplicons_name, sample, fastq_1, fastq_2, amplicons -> tuple(sample, fastq_1, fastq_2, amplicons) }
 
     // --- CRISPRessoPooled per fastq sample, against its project's amplicons ---
+    // cores/memory come from the CRISPRESSO_POOLED block in conf/processes.config
+    // (driven by crispresso_n_processes / crispresso_memory); the process passes
+    // task.cpus to --n_processes so the request and the flag can't drift
     CRISPRESSO_POOLED(
         ch_fastq,
-        params.crispresso_n_processes,
         params.crispresso_min_reads_to_use_region,
         params.crispresso_skip_failed,
+        params.crispresso_suppress_plots,
     )
 
     // --- summary report over all samples ---

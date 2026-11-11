@@ -173,10 +173,11 @@
             "properties": {
                 "crispresso_n_processes": {
                     "type": "integer",
-                    "default": 1,
+                    "default": 4,
                     "minimum": 1,
-                    "description": "Number of CRISPRessoPooled processes to run in parallel (n_processes).",
-                    "fa_icon": "fas fa-microchip"
+                    "description": "Cores per CRISPRessoPooled task. Also sets the process's cpus request.",
+                    "fa_icon": "fas fa-microchip",
+                    "help_text": "Passed to CRISPResso as --n_processes via task.cpus, so the scheduler request and the flag always agree. CRISPResso's memory use rises with this, so raise crispresso_memory alongside it."
                 },
                 "crispresso_min_reads_to_use_region": {
                     "type": "integer",
@@ -190,6 +191,17 @@
                     "default": true,
                     "description": "Pass --skip_failed to CRISPRessoPooled so one failing amplicon doesn't fail the whole sample.",
                     "help_text": "With this on, an amplicon CRISPResso errors on is dropped and the rest of that sample's panel is still quantified. The skipped amplicon is absent from CRISPResso's output, which the report counts as not_tested (missing_from_output), so it is reported rather than lost. Turn it off to have a single failing amplicon fail the sample's CRISPRessoPooled task."
+                },
+                "crispresso_memory": {
+                    "type": "string",
+                    "default": "16.GB",
+                    "description": "Memory per CRISPRessoPooled task, multiplied by the attempt number on retry."
+                },
+                "crispresso_suppress_plots": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Pass --suppress_plots to CRISPRessoPooled, skipping its per-amplicon plots.",
+                    "help_text": "A large speed-up on big panels. This pipeline's own report is built from SAMPLES_QUANTIFICATION_SUMMARY.txt, not from CRISPResso's plots, so nothing in it is lost. CRISPResso's HTML report is gated by a separate flag and is still written."
                 }
             }
         },
